@@ -192,6 +192,8 @@ footer{text-align:center;color:var(--mut);font-size:12px;padding:18px;border-top
 .aihero .ov p{color:#fff;margin:6px 0 0;font-size:13.5px;line-height:1.9}
 .aihero .aibadge{align-self:flex-start;background:rgba(255,215,94,.15);border:1px solid #ffd75e;color:#ffd75e;font-size:12px;padding:4px 12px;border-radius:14px;margin-bottom:8px}
 .aipick{display:inline-block;background:#111;color:#ffd75e;font-size:11px;padding:2px 10px;border-radius:10px;margin-top:6px}
+.hl{background:linear-gradient(180deg,transparent 62%,#ffd75e 62%,#ffd75e 96%,transparent 96%);padding:0 3px}
+header .hl{background:linear-gradient(180deg,transparent 55%,#ffd75e 55%,#ffd75e 95%,transparent 95%);color:#fff;padding:0 6px}
 </style>"""
 
 PROMO_BANNER = """<a class="promo" href="https://t.me/khabarator" target="_blank" rel="noopener">
@@ -222,7 +224,7 @@ def page_shell(title: str, desc: str, url: str, h1: str, sub: str,
 <meta property="og:description" content="{html.escape(desc)}">
 <meta property="og:type" content="website">
 {STYLE}</head><body>
-<header><h1>{html.escape(h1)}</h1><p>{html.escape(sub)}</p><span class="live">● فعال</span></header>
+<header><h1>{h1}</h1><p>{html.escape(sub)}</p><span class="live">● فعال</span></header>
 {PROMO_BANNER}
 {nav}
 {body}
@@ -244,7 +246,7 @@ def build_city_page(city: str, deals: list[dict], nav: str, updated_fa: str) -> 
             f'<h2 class="sec">فرصت‌های امروز {html.escape(city)} ({fa_num(len(deals))})</h2>'
             f'<div class="grid">{cards}</div>')
     return page_shell(title, desc, f"{SITE_URL}/city/{city_slug(city)}.html",
-                      f"🎯 زیرقیمت‌های دیوار {city}",
+                      f"🎯 زیرقیمت‌های دیوار <span class=\"hl\">{html.escape(city)}</span>",
                       f"{fa_num(len(deals))} فرصت فعال — به‌روزرسانی خودکار هر ۳۰ دقیقه",
                       body, nav, updated_fa)
 
@@ -260,7 +262,7 @@ def build_cat_page(cat: str, deals: list[dict], nav: str, updated_fa: str) -> st
             f'<h2 class="sec">{html.escape(fa_name)} زیر قیمت ({fa_num(len(deals))})</h2>'
             f'<div class="grid">{cards}</div>')
     return page_shell(title, desc, f"{SITE_URL}/cat/{slug}.html",
-                      f"🎯 {seo_phrase}",
+                      f"🎯 <span class=\"hl\">{html.escape(seo_phrase)}</span>",
                       f"{fa_num(len(deals))} فرصت فعال در ۳۱ مرکز استان",
                       body, nav, updated_fa)
 
@@ -273,8 +275,8 @@ INDEX_HTML = """<!doctype html><html lang="fa" dir="rtl"><head><meta charset="ut
 <meta property="og:description" content="آپارتمان، خودرو، موبایل و ملک تجاری زیر قیمت — ۳۱ مرکز استان، هر ۳۰ دقیقه تازه‌سازی.">
 <meta property="og:type" content="website">
 """ + STYLE + """</head><body>
-<header><h1>🎯 قاپ</h1><p>فرصت رو قاپ بزن — زیرقیمت‌های واقعی دیوار در ۳۱ مرکز استان — هر ۳۰ دقیقه تازه‌سازی</p><span class="live">● فعال</span></header>
-<div class="aihero"><img src="assets/ai-hero.jpg" alt="هوش مصنوعی قاپ"><div class="ov"><span class="aibadge">🤖 قدرت‌گرفته از هوش مصنوعی</span><h2>هوش مصنوعی قاپ، فرصت‌های طلایی را شکار می‌کند</h2><p>موتور هوشمند ما هر ۳۰ دقیقه هزاران آگهی دیوار را می‌خواند، قیمت هر محله و مدل را می‌سنجد و فقط واقعی‌ترین زیرقیمت‌ها را اینجا می‌گذارد.</p></div></div>
+<header><h1>🎯 <span class="hl">قاپ</span></h1><p>فرصت رو قاپ بزن — زیرقیمت‌های واقعی دیوار در ۳۱ مرکز استان — هر ۳۰ دقیقه تازه‌سازی</p><span class="live">● فعال</span></header>
+<div class="aihero"><img src="assets/ai-hero.jpg" alt="هوش مصنوعی قاپ"><div class="ov"><span class="aibadge">🤖 قدرت‌گرفته از هوش مصنوعی</span><h2>هوش مصنوعی قاپ، <span class="hl">فرصت‌های طلایی</span> را شکار می‌کند</h2><p>موتور هوشمند ما هر ۳۰ دقیقه هزاران آگهی دیوار را می‌خواند، قیمت هر محله و مدل را می‌سنجد و فقط واقعی‌ترین زیرقیمت‌ها را اینجا می‌گذارد.</p></div></div>
 """ + PROMO_BANNER + """
 __NAV__
 <div class="filters" style="display:flex;gap:8px;justify-content:center;padding:14px;flex-wrap:wrap">
