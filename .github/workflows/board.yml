@@ -16,7 +16,7 @@ concurrency:
 
 env:
   DEALS_DB: ${{ github.workspace }}/deals.db
-  SITE_URL: https://mhsne.github.io/shekar-forsat
+  SITE_URL: https://shekarforsat.github.io/shekar-forsat
 
 jobs:
   build-and-deploy:
