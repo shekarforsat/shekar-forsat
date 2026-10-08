@@ -184,12 +184,16 @@ def load_baseline(con: sqlite3.Connection) -> BaselineStore:
 
 
 def rebuild_baselines(con: sqlite3.Connection) -> int:
-    """میانهٔ قیمت از کل آگهی‌های دیده‌شده — هر ساعت یک‌بار صدا بزن."""
+    """میانهٔ قیمت از آگهی‌های سالم — طعمه‌ها (قسطی/وام/پیش‌فروش) میانه را آلوده می‌کنند، کنار گذاشته می‌شوند."""
     from statistics import median
-    from engine import _house_segment, _car_segment
+    from engine import _house_segment, _car_segment, is_bait, Ad as _Ad
     groups: dict[tuple, list[int]] = {}
     for token, title, category, city, district, price, area_m2, brand, model, year, year_built in con.execute(
             "SELECT token,title,category,city,district,price,area_m2,brand,model,year,year_built FROM ads WHERE price>0"):
+        # فیلتر ریشه‌ای آلودگی: قیمت طعمه هرگز وارد میانه نمی‌شود
+        if is_bait(_Ad(token=token, title=title or "", category=category or "", city="", district="",
+                       price=price, area_m2=area_m2 or 0, brand="", model="", year=0)):
+            continue
         city = city or "تهران"
         if category in ("house_sell", "house_rent", "commercial_sell", "commercial_rent"):
             if not area_m2 or not district:
@@ -333,24 +337,26 @@ def main():
         nb = rebuild_baselines(con)
         print(f"bootstrap done: baselines={nb}")
     baseline = load_baseline(con)
-    # بازکالیبراسیون: همهٔ «فرصت»های قبلی را با منطق تازه (طعمه/قیمت‌مشکوک) دوباره بسنج؛
-    # هر کدام که دیگر فرصت واقعی نیست از برد می‌افتد (فقط golden/opportunity نمایش داده می‌شود)
+    # بازکالیبراسیون: همهٔ «فرصت»های قبلی را با منطق و بیس‌لاین تازه دوباره بسنج؛
+    # سطح و درصد همیشه با محاسبهٔ فعلی همگام می‌شود (نه فقط هنگام تنزل) —
+    # وگرنه درصد کهنه (مثلاً ۷۵٪ با بیس‌لاین آلودهٔ قدیمی) روی برد می‌ماند.
     recalibrated = 0
     for row in con.execute(
-            "SELECT token,title,category,city,district,price,area_m2,brand,model,year FROM ads WHERE tier IN ('golden','opportunity')"):
-        token, title, category, city, district, price, area_m2, brand, model, year = row
+            "SELECT token,title,category,city,district,price,area_m2,brand,model,year,tier,discount FROM ads WHERE tier IN ('golden','opportunity')"):
+        token, title, category, city, district, price, area_m2, brand, model, year, old_tier, old_disc = row
         ad = Ad(token=token, title=title or "", category=category or "", city=city or "تهران",
                 district=district, price=price, area_m2=area_m2, brand=brand or "",
                 model=model or "", year=year)
         s = score_ad(ad, baseline)
         new_tier = s.tier if s else "none"
-        if new_tier not in ("golden", "opportunity"):
+        new_disc = round(s.discount_pct, 4) if s else 0.0
+        if new_tier != old_tier or abs(new_disc - (old_disc or 0.0)) > 0.0001:
             con.execute("UPDATE ads SET tier=?, discount=? WHERE token=?",
-                        (new_tier, round(s.discount_pct, 4) if s else 0.0, token))
+                        (new_tier, new_disc, token))
             recalibrated += 1
     if recalibrated:
         con.commit()
-        print(f"recalibrated: {recalibrated} deals downgraded (bait/suspicious)")
+        print(f"recalibrated: {recalibrated} deals re-synced (tier/discount)")
     # بازامتیازدهی آگهی‌های قبلی با بیس‌لاین تازه (برای بوت‌استرپ و کالیبراسیون)
     rescored = 0
     for row in con.execute(

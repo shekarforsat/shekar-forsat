@@ -120,36 +120,57 @@ def load_deals(db_path: str, limit: int = 80, city: str | None = None,
     params.append(limit)
     rows = con.execute(q, params).fetchall()
     con.close()
+    # تعداد آگهی هر شهر/دسته برای «مقایسه با N آگهی»
+    con2 = sqlite3.connect(db_path)
+    counts = {(c, k): n for c, k, n in
+              con2.execute("SELECT city, category, COUNT(*) FROM ads GROUP BY city, category").fetchall()}
+    con2.close()
     deals = []
     for token, title, category, city, district, price, img, tier, discount, _ in rows:
         discount = discount or 0.0
         fair = round(price / (1 - discount)) if discount > 0 else price
+        cat = "car" if category == "cars" else (category or "")
         deals.append({
             "token": token, "title": title or "",
-            "category": "car" if category == "cars" else (category or ""),
+            "category": cat,
             "city": city or "", "district": district or "",
             "price": price, "fair": fair,
             "discount": round(discount, 4), "tier": tier, "img": img or "",
+            "n": counts.get((city, category), 0),
         })
     return deals
 
 
-def card_html(d: dict) -> str:
+def _conf(n: int) -> str:
+    if n >= 50: return "اطمینان بالا"
+    if n >= 15: return "اطمینان متوسط"
+    return "اطمینان کم"
+
+
+def card_html(d: dict, idx: int = 0) -> str:
     t = html.escape(d["title"])
-    badge = ("💎 فرصت طلایی" if d["tier"] == "golden" else "🔥 فرصت")
-    ai = '<span class="aipick">🤖 شکار هوش مصنوعی</span>' if d["tier"] == "golden" else ""
-    cat = CAT_FA.get(d["category"], "")
-    loc = " · ".join(x for x in [d["city"], d["district"]] if x)
+    pct = round(d["discount"] * 100)
+    unit = "زیر قیمت محله" if d["category"] in ("house_sell", "house_rent", "commercial_sell", "commercial_rent") else "زیر قیمت بازار"
+    badge = ("◇ فرصت طلایی" if d["tier"] == "golden" else "◇ فرصت")
+    loc = d["district"] or d["city"]
     img = (f'<img src="{html.escape(d["img"])}" loading="lazy" alt="{t}">'
            if d["img"] else "")
+    save = d["fair"] - d["price"]
+    w = max(4, min(100, round(d["price"] / d["fair"] * 100))) if d["fair"] > 0 else 100
     return f"""
   <a class="card {d['tier']}" href="https://divar.ir/v/{html.escape(d['token'])}" target="_blank" rel="noopener">
-    <span class="badge {d['tier']}">{badge} {fa_num(round(d['discount']*100))}٪ زیر قیمت</span>
+    <span class="num">{fa_num(idx + 1)}</span>
+    <span class="badge {d['tier']}">{badge}</span>
     {img}
-    <div class="body"><p class="title">{t}</p>
-    <div class="meta">{html.escape(cat)}{' · ' if cat and loc else ''}{html.escape(loc)}</div>
+    <div class="body">
+    <div class="kick">{html.escape(loc)}</div>
+    <h3><span class="hl">{fa_num(pct)}٪</span> {unit}</h3>
+    <p class="title">{t}</p>
     <div class="price">{fa_num(f'{d["price"]:,}')} تومان</div>
-    <div class="disc">قیمت منصفانه: {fa_num(f'{d["fair"]:,}')} تومان</div>{ai}</div>
+    <div class="cmp"><div class="cmpbar"><i style="width:{w}%"></i></div>
+    <div class="cmplab"><span>منصفانه: {fa_num(f'{d["fair"]:,}')}</span><span class="save">{fa_num(f'{save:,}')} کمتر</span></div></div>
+    <div class="conf">{_conf(d['n'])} · مقایسه با {fa_num(d['n'])} آگهی · <span class="aipick">🤖 شکار هوش مصنوعی</span></div>
+    </div>
   </a>"""
 
 
@@ -194,6 +215,15 @@ footer{text-align:center;color:var(--mut);font-size:12px;padding:18px;border-top
 .aipick{display:inline-block;background:#111;color:#ffd75e;font-size:11px;padding:2px 10px;border-radius:10px;margin-top:6px}
 .hl{background:linear-gradient(180deg,transparent 62%,#ffd75e 62%,#ffd75e 96%,transparent 96%);padding:0 3px}
 header .hl{background:linear-gradient(180deg,transparent 55%,#ffd75e 55%,#ffd75e 95%,transparent 95%);color:#fff;padding:0 6px}
+.num{position:absolute;top:10px;right:10px;background:rgba(17,17,17,.85);color:#ffd75e;font-size:13px;font-weight:bold;width:30px;height:30px;line-height:30px;text-align:center;border-radius:50%;z-index:2}
+.kick{font-size:11.5px;color:var(--mut);margin-bottom:2px}
+.card h3{margin:4px 0 6px;font-size:19px}
+.cmp{margin-top:10px}
+.cmpbar{height:8px;background:#eee;border-radius:5px;overflow:hidden}
+.cmpbar i{display:block;height:100%;background:linear-gradient(90deg,#ffd75e,#e0a800);border-radius:5px}
+.cmplab{display:flex;justify-content:space-between;font-size:11.5px;color:var(--mut);margin-top:4px}
+.cmplab .save{color:#1b5e20;font-weight:bold}
+.conf{font-size:11.5px;color:var(--mut);margin-top:8px;border-top:1px dashed #eee;padding-top:8px}
 </style>"""
 
 PROMO_BANNER = """<a class="promo" href="https://t.me/khabarator" target="_blank" rel="noopener">
@@ -239,7 +269,7 @@ def build_city_page(city: str, deals: list[dict], nav: str, updated_fa: str) -> 
     title = f"زیرقیمت‌های دیوار {city} | قاپ"
     desc = (f"آگهی‌های زیر قیمت واقعی دیوار {city} — آپارتمان، خودرو، موبایل و ملک تجاری. "
             f"{fa_num(len(deals))} فرصت فعال ({fa_num(gold)} طلایی)، به‌روزرسانی هر ۳۰ دقیقه.")
-    cards = "".join(card_html(d) for d in deals) or '<div class="empty">هنوز فرصت تازه‌ای ثبت نشده — چند دقیقه دیگر سر بزن.</div>'
+    cards = "".join(card_html(d, i) for i, d in enumerate(deals)) or '<div class="empty">هنوز فرصت تازه‌ای ثبت نشده — چند دقیقه دیگر سر بزن.</div>'
     body = (f'<div class="intro">خونه، ماشین، گوشی یا مغازه زیر قیمت در <b>{html.escape(city)}</b> می‌خوای؟ '
             f'این صفحه آگهی‌های دیوار {html.escape(city)} را که از قیمت منصفانهٔ محله/مدل پایین‌ترند، هر ۳۰ دقیقه '
             f'تازه می‌کند. روی هر کارت بزن تا آگهی اصلی در دیوار باز شود.</div>'
@@ -256,7 +286,7 @@ def build_cat_page(cat: str, deals: list[dict], nav: str, updated_fa: str) -> st
     title = f"{seo_phrase} در دیوار | قاپ"
     desc = (f"{seo_phrase} — آگهی‌های واقعی دیوار که از قیمت منصفانه پایین‌ترند، در ۳۱ مرکز استان. "
             f"به‌روزرسانی هر ۳۰ دقیقه.")
-    cards = "".join(card_html(d) for d in deals) or '<div class="empty">هنوز فرصت تازه‌ای ثبت نشده — چند دقیقه دیگر سر بزن.</div>'
+    cards = "".join(card_html(d, i) for i, d in enumerate(deals)) or '<div class="empty">هنوز فرصت تازه‌ای ثبت نشده — چند دقیقه دیگر سر بزن.</div>'
     body = (f'<div class="intro"><b>{html.escape(fa_name)}</b> زیر قیمت در دیوار؟ این صفحه آگهی‌هایی را نشان می‌دهد '
             f'که از قیمت منصفانهٔ بازار پایین‌ترند — در همهٔ ۳۱ مرکز استان، با تازه‌سازی هر ۳۰ دقیقه.</div>'
             f'<h2 class="sec">{html.escape(fa_name)} زیر قیمت ({fa_num(len(deals))})</h2>'
@@ -295,19 +325,30 @@ async function load(){
   document.getElementById("updated").textContent="آخرین به‌روزرسانی: "+j.updated_fa+" — "+fa(j.count)+" آگهی زیرقیمت";
   render();
 }
+function conf(n){return n>=50?"اطمینان بالا":n>=15?"اطمینان متوسط":"اطمینان کم";}
+function unit(cat){return ["house_sell","house_rent","commercial_sell","commercial_rent"].includes(cat)?"زیر قیمت محله":"زیر قیمت بازار";}
 function render(){
   const g=document.getElementById("grid");
   const list=all.filter(d=>f==="all"?true:d.tier===f);
   if(!list.length){g.innerHTML='<div class="empty">هنوز فرصت تازه‌ای ثبت نشده — چند دقیقه دیگر سر بزن.</div>';return;}
-  g.innerHTML=list.map(d=>`
+  g.innerHTML=list.map((d,i)=>{
+  const pct=Math.round(d.discount*100), save=d.fair-d.price;
+  const w=Math.max(4,Math.min(100,Math.round(d.price/d.fair*100)));
+  return `
   <a class="card ${d.tier}" href="https://divar.ir/v/${d.token}" target="_blank" rel="noopener">
-    <span class="badge ${d.tier}">${d.tier==="golden"?"💎 فرصت طلایی":"🔥 فرصت"} ${fa(Math.round(d.discount*100))}٪ زیر قیمت</span>
+    <span class="num">${fa(i+1)}</span>
+    <span class="badge ${d.tier}">${d.tier==="golden"?"◇ فرصت طلایی":"◇ فرصت"}</span>
     ${d.img?`<img src="${d.img}" loading="lazy" alt="">`:""}
-    <div class="body"><p class="title"></p>
-    <div class="meta">${CAT[d.category]||""} · ${d.city||""} ${d.district||""}</div>
+    <div class="body">
+    <div class="kick">${d.district||d.city||""}</div>
+    <h3><span class="hl">${fa(pct)}٪</span> ${unit(d.category)}</h3>
+    <p class="title"></p>
     <div class="price">${fa(d.price.toLocaleString("en"))} تومان</div>
-    <div class="disc">قیمت منصفانه: ${fa(d.fair.toLocaleString("en"))} تومان</div></div>
-  </a>`).join("");
+    <div class="cmp"><div class="cmpbar"><i style="width:${w}%"></i></div>
+    <div class="cmplab"><span>منصفانه: ${fa(d.fair.toLocaleString("en"))}</span><span class="save">${fa(save.toLocaleString("en"))} کمتر</span></div></div>
+    <div class="conf">${conf(d.n||0)} · مقایسه با ${fa(d.n||0)} آگهی · <span class="aipick">🤖 شکار هوش مصنوعی</span></div>
+    </div>
+  </a>`;}).join("");
   document.querySelectorAll(".title").forEach((el,i)=>{el.textContent=list[i].title;});
 }
 document.querySelectorAll(".filters button").forEach(b=>b.onclick=()=>{
