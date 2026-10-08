@@ -21,6 +21,26 @@ from typing import Optional
 
 OPPORTUNITY_THRESHOLD = 0.15   # ۱۵٪ زیر میانه
 GOLDEN_THRESHOLD = 0.22        # ۲۲٪ زیر میانه
+SUSPICIOUS_THRESHOLD = 0.40    # ۴۰٪ زیر میانه = «قیمت مشکوک» (مثل مدل دلال رادین):
+                               # بیشتر طعمه/صوری است تا فرصت واقعی — در برد عمومی نمایش داده نمی‌شود
+
+# تیتر آگهی‌های «قیمت طعمه»: پیش‌پرداخت قسطی/وام/پیش‌فروش به‌جای قیمت فروش.
+# این قیمت‌ها با قیمت فروش واقعی قابل مقایسه نیستند و امتیاز نمی‌گیرند.
+BAIT_KEYWORDS = ("قسط", "اقساط", "پیش‌پرداخت", "پیش پرداخت", "پیشپرداخت",
+                 "وام", "چکی", "پیش‌فروش", "پیش فروش")
+# قطعات و لوازم موبایل — نه خود گوشی؛ نباید با گوشی کامل مقایسه شوند.
+MOBILE_PART_KEYWORDS = ("السیدی", "ال‌سی‌دی", "lcd", "باتری", "قاب", "گلس",
+                        "برد", "تاچ", "شارژر", "هندزفری", "درب پشت", "فلت")
+
+
+def is_bait(ad: "Ad") -> bool:
+    """آگهی طعمه‌ای است؟ (قیمت غیرقابل مقایسه با فروش واقعی)"""
+    t = (ad.title or "")
+    if any(k in t for k in BAIT_KEYWORDS):
+        return True
+    if ad.category == "mobile" and any(k in t.lower() for k in MOBILE_PART_KEYWORDS):
+        return True
+    return False
 
 
 @dataclass
@@ -49,7 +69,7 @@ class ScoredAd:
     ad: Ad
     fair_price: int
     discount_pct: float     # درصد زیر قیمت منصفانه (مثبت = زیر قیمت)
-    tier: str               # 'none' | 'opportunity' | 'golden'
+    tier: str               # 'none' | 'opportunity' | 'golden' | 'suspicious'
 
 
 def fa_digits_to_int(text: str) -> Optional[int]:
@@ -129,6 +149,9 @@ def score_ad(ad: Ad, baseline: BaselineStore) -> Optional[ScoredAd]:
     """امتیازدهی یک آگهی؛ None یعنی دیتای کافی برای قضاوت نیست."""
     if not ad.price or ad.price <= 0:
         return None
+    # قیمت طعمه (پیش‌پرداخت قسطی/وام/قطعه) — با قیمت فروش واقعی قابل مقایسه نیست
+    if is_bait(ad):
+        return None
     # فیلتر سلامت: قیمت‌های غیرممکن (جای خالی قیمت/تماس) را حذف کن
     if ad.category in ("house_sell", "house_rent", "commercial_sell", "commercial_rent") and ad.area_m2:
         per_m2 = ad.price / ad.area_m2
@@ -144,7 +167,9 @@ def score_ad(ad: Ad, baseline: BaselineStore) -> Optional[ScoredAd]:
     if not fair or fair <= 0:
         return None
     discount = (fair - ad.price) / fair
-    if discount >= GOLDEN_THRESHOLD:
+    if discount >= SUSPICIOUS_THRESHOLD:
+        tier = "suspicious"   # قیمت مشکوک — طعمه/صوری؛ فرصت نیست
+    elif discount >= GOLDEN_THRESHOLD:
         tier = "golden"
     elif discount >= OPPORTUNITY_THRESHOLD:
         tier = "opportunity"
@@ -154,13 +179,14 @@ def score_ad(ad: Ad, baseline: BaselineStore) -> Optional[ScoredAd]:
 
 
 def score_batch(ads: list[Ad], baseline: BaselineStore) -> list[ScoredAd]:
-    """فقط آگهی‌های فرصت/طلایی، مرتب از بیشترین تخفیف."""
+    """فقط آگهی‌های فرصت/طلایی، مرتب از بیشترین تخفیف (مشکوک‌ها بیرون)."""
     out = []
     for ad in ads:
         s = score_ad(ad, baseline)
-        if s and s.tier != "none":
+        if s and s.tier in ("golden", "opportunity"):
             out.append(s)
     return sorted(out, key=lambda s: s.discount_pct, reverse=True)
 
 
-TIER_FA = {"golden": "فرصت طلایی", "opportunity": "فرصت", "none": "—"}
+TIER_FA = {"golden": "فرصت طلایی", "opportunity": "فرصت", "none": "—",
+           "suspicious": "قیمت مشکوک"}

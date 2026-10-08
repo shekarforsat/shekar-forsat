@@ -294,6 +294,19 @@ def poll_once(con: sqlite3.Connection, baseline: BaselineStore) -> list:
 
 def main():
     con = init_db()
+    # خودترمیمی: آگهی‌های طعمه‌ای که قبلاً اشتباه «فرصت» گرفته‌اند را حذف کن
+    # (تیتر قسطی/وام/پیش‌فروش یا قطعهٔ موبایل — قیمتشان با فروش واقعی قابل مقایسه نیست)
+    from engine import is_bait
+    purged = 0
+    for token, title, category in con.execute(
+            "SELECT token,title,category FROM ads WHERE tier IN ('golden','opportunity')"):
+        ad = Ad(token=token, title=title or "", category=category or "")
+        if is_bait(ad):
+            con.execute("DELETE FROM ads WHERE token=?", (token,))
+            purged += 1
+    if purged:
+        con.commit()
+        print(f"purged {purged} bait ads")
     # بوت‌استرپ اولیه: اگر دیتابیس خالی است، ۳ صفحه بگیر و بیس‌لاین بساز
     n_ads = con.execute("SELECT COUNT(*) FROM ads").fetchone()[0]
     if n_ads == 0:
@@ -320,6 +333,24 @@ def main():
         nb = rebuild_baselines(con)
         print(f"bootstrap done: baselines={nb}")
     baseline = load_baseline(con)
+    # بازکالیبراسیون: همهٔ «فرصت»های قبلی را با منطق تازه (طعمه/قیمت‌مشکوک) دوباره بسنج؛
+    # هر کدام که دیگر فرصت واقعی نیست از برد می‌افتد (فقط golden/opportunity نمایش داده می‌شود)
+    recalibrated = 0
+    for row in con.execute(
+            "SELECT token,title,category,city,district,price,area_m2,brand,model,year FROM ads WHERE tier IN ('golden','opportunity')"):
+        token, title, category, city, district, price, area_m2, brand, model, year = row
+        ad = Ad(token=token, title=title or "", category=category or "", city=city or "تهران",
+                district=district, price=price, area_m2=area_m2, brand=brand or "",
+                model=model or "", year=year)
+        s = score_ad(ad, baseline)
+        new_tier = s.tier if s else "none"
+        if new_tier not in ("golden", "opportunity"):
+            con.execute("UPDATE ads SET tier=?, discount=? WHERE token=?",
+                        (new_tier, round(s.discount_pct, 4) if s else 0.0, token))
+            recalibrated += 1
+    if recalibrated:
+        con.commit()
+        print(f"recalibrated: {recalibrated} deals downgraded (bait/suspicious)")
     # بازامتیازدهی آگهی‌های قبلی با بیس‌لاین تازه (برای بوت‌استرپ و کالیبراسیون)
     rescored = 0
     for row in con.execute(

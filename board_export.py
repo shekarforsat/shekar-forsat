@@ -22,7 +22,7 @@ import sqlite3
 from datetime import datetime, timezone, timedelta
 
 FA = "۰۱۲۳۴۵۶۷۸۹"
-SITE_URL = os.environ.get("SITE_URL", "https://shekarchi-forsat.github.io/shekar-forsat").rstrip("/")
+SITE_URL = os.environ.get("SITE_URL", "https://shekarforsat.github.io/shekar-forsat").rstrip("/")
 
 
 def fa_num(n) -> str:
@@ -137,6 +137,7 @@ def load_deals(db_path: str, limit: int = 80, city: str | None = None,
 def card_html(d: dict) -> str:
     t = html.escape(d["title"])
     badge = ("💎 فرصت طلایی" if d["tier"] == "golden" else "🔥 فرصت")
+    ai = '<span class="aipick">🤖 شکار هوش مصنوعی</span>' if d["tier"] == "golden" else ""
     cat = CAT_FA.get(d["category"], "")
     loc = " · ".join(x for x in [d["city"], d["district"]] if x)
     img = (f'<img src="{html.escape(d["img"])}" loading="lazy" alt="{t}">'
@@ -148,7 +149,7 @@ def card_html(d: dict) -> str:
     <div class="body"><p class="title">{t}</p>
     <div class="meta">{html.escape(cat)}{' · ' if cat and loc else ''}{html.escape(loc)}</div>
     <div class="price">{fa_num(f'{d["price"]:,}')} تومان</div>
-    <div class="disc">قیمت منصفانه: {fa_num(f'{d["fair"]:,}')} تومان</div></div>
+    <div class="disc">قیمت منصفانه: {fa_num(f'{d["fair"]:,}')} تومان</div>{ai}</div>
   </a>"""
 
 
@@ -184,6 +185,13 @@ footer{text-align:center;color:var(--mut);font-size:12px;padding:18px;border-top
 .promo b{font-size:15px}
 .promo .txt{font-size:12.5px;opacity:.92;display:block;margin-top:2px}
 .promo .cta{margin-inline-start:auto;background:#fff;color:#0E2E34;font-size:13px;font-weight:bold;padding:7px 18px;border-radius:20px;white-space:nowrap}
+.aihero{position:relative;max-width:1200px;margin:14px auto 0;border-radius:16px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,.25)}
+.aihero img{width:100%;display:block}
+.aihero .ov{position:absolute;inset:0;background:linear-gradient(to top,rgba(0,0,0,.78) 0%,rgba(0,0,0,.15) 55%,rgba(0,0,0,.05) 100%);display:flex;flex-direction:column;justify-content:flex-end;padding:22px}
+.aihero .ov h2{color:#ffd75e;margin:0;font-size:20px}
+.aihero .ov p{color:#fff;margin:6px 0 0;font-size:13.5px;line-height:1.9}
+.aihero .aibadge{align-self:flex-start;background:rgba(255,215,94,.15);border:1px solid #ffd75e;color:#ffd75e;font-size:12px;padding:4px 12px;border-radius:14px;margin-bottom:8px}
+.aipick{display:inline-block;background:#111;color:#ffd75e;font-size:11px;padding:2px 10px;border-radius:10px;margin-top:6px}
 </style>"""
 
 PROMO_BANNER = """<a class="promo" href="https://t.me/khabarator" target="_blank" rel="noopener">
@@ -266,6 +274,7 @@ INDEX_HTML = """<!doctype html><html lang="fa" dir="rtl"><head><meta charset="ut
 <meta property="og:type" content="website">
 """ + STYLE + """</head><body>
 <header><h1>🎯 شکارچی فرصت</h1><p>زیرقیمت‌های واقعی دیوار — ۳۱ مرکز استان — به‌روزرسانی خودکار هر ۳۰ دقیقه</p><span class="live">● فعال</span></header>
+<div class="aihero"><img src="assets/ai-hero.jpg" alt="هوش مصنوعی شکارچی فرصت"><div class="ov"><span class="aibadge">🤖 قدرت‌گرفته از هوش مصنوعی</span><h2>هوش مصنوعی، فرصت‌های طلایی را شکار می‌کند</h2><p>موتور هوشمند ما هر ۳۰ دقیقه هزاران آگهی دیوار را می‌خواند، قیمت هر محله و مدل را می‌سنجد و فقط واقعی‌ترین زیرقیمت‌ها را اینجا می‌گذارد.</p></div></div>
 """ + PROMO_BANNER + """
 __NAV__
 <div class="filters" style="display:flex;gap:8px;justify-content:center;padding:14px;flex-wrap:wrap">
@@ -329,6 +338,12 @@ def main() -> None:
     os.makedirs(args.out, exist_ok=True)
     os.makedirs(f"{args.out}/city", exist_ok=True)
     os.makedirs(f"{args.out}/cat", exist_ok=True)
+    os.makedirs(f"{args.out}/assets", exist_ok=True)
+    # تصویر هیروی هوش مصنوعی (کنار همین اسکریپت در site-assets/)
+    _hero = os.path.join(os.path.dirname(os.path.abspath(__file__)), "site-assets", "ai-hero.jpg")
+    if os.path.exists(_hero):
+        import shutil
+        shutil.copyfile(_hero, f"{args.out}/assets/ai-hero.jpg")
     updated_fa = tehran_now_fa()
     date_iso = today_iso()
 
