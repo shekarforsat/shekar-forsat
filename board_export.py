@@ -213,8 +213,13 @@ footer{text-align:center;color:var(--mut);font-size:12px;padding:18px;border-top
 .aihero .ov p{color:#fff;margin:6px 0 0;font-size:13.5px;line-height:1.9}
 .aihero .aibadge{align-self:flex-start;background:rgba(255,215,94,.15);border:1px solid #ffd75e;color:#ffd75e;font-size:12px;padding:4px 12px;border-radius:14px;margin-bottom:8px}
 .aipick{display:inline-block;background:#111;color:#ffd75e;font-size:11px;padding:2px 10px;border-radius:10px;margin-top:6px}
-.hl{background:linear-gradient(180deg,transparent 62%,#ffd75e 62%,#ffd75e 96%,transparent 96%);padding:0 3px}
-header .hl{background:linear-gradient(180deg,transparent 55%,#ffd75e 55%,#ffd75e 95%,transparent 95%);color:#fff;padding:0 6px}
+.hl{--hl-c:#FFD75E;--hl-pool:#D9A400;--hl-bg:#fff;--hl-y:.22em;--hl-h:.38em;--hl-txt:currentColor;
+text-shadow:.05em 0 var(--hl-bg),-.05em 0 var(--hl-bg),0 .05em var(--hl-bg),0 -.05em var(--hl-bg),.035em .035em var(--hl-bg),-.035em .035em var(--hl-bg);
+color:var(--hl-txt);padding-inline:.1em;-webkit-box-decoration-break:clone;box-decoration-break:clone;
+background:linear-gradient(98deg,transparent calc(100% - .17em),var(--hl-pool) calc(100% - .17em) calc(100% - .1em),transparent calc(100% - .1em)) 100% calc(100% - var(--hl-y))/100% var(--hl-h) no-repeat,linear-gradient(98deg,transparent .2em,var(--hl-c) .2em calc(100% - .1em),transparent calc(100% - .1em)) 100% calc(100% - var(--hl-y))/100% var(--hl-h) no-repeat,linear-gradient(98deg,transparent .07em,var(--hl-c) .07em .3em,transparent .3em) 100% calc(100% - var(--hl-y) - .28em)/100% .12em no-repeat,linear-gradient(98deg,transparent .01em,var(--hl-c) .01em .3em,transparent .3em) 100% calc(100% - var(--hl-y) - .13em)/100% .115em no-repeat,linear-gradient(98deg,transparent .12em,var(--hl-c) .12em .3em,transparent .3em) 100% calc(100% - var(--hl-y))/100% .095em no-repeat}
+header .hl{--hl-bg:#111;--hl-txt:#fff}
+.card h3 .hl{--hl-bg:#fff}
+.aihero .ov h2 .hl{--hl-bg:transparent;--hl-txt:#fff}
 .num{position:absolute;top:10px;right:10px;background:rgba(17,17,17,.85);color:#ffd75e;font-size:13px;font-weight:bold;width:30px;height:30px;line-height:30px;text-align:center;border-radius:50%;z-index:2}
 .kick{font-size:11.5px;color:var(--mut);margin-bottom:2px}
 .card h3{margin:4px 0 6px;font-size:19px}
