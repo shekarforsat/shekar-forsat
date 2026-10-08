@@ -179,7 +179,17 @@ a.card{text-decoration:none;color:inherit;display:block}
 .intro{max-width:800px;margin:0 auto;padding:14px 18px;font-size:14px;line-height:2;color:#333}
 h2.sec{max-width:1200px;margin:6px auto 0;padding:0 18px;font-size:17px}
 footer{text-align:center;color:var(--mut);font-size:12px;padding:18px;border-top:1px solid #eee;background:#fff}
+.promo{display:flex;align-items:center;gap:12px;max-width:1200px;margin:14px auto 0;padding:12px 18px;background:linear-gradient(135deg,#0E2E34,#0A7F6E);color:#fff;border-radius:14px;text-decoration:none}
+.promo .emj{font-size:26px}
+.promo b{font-size:15px}
+.promo .txt{font-size:12.5px;opacity:.92;display:block;margin-top:2px}
+.promo .cta{margin-inline-start:auto;background:#fff;color:#0E2E34;font-size:13px;font-weight:bold;padding:7px 18px;border-radius:20px;white-space:nowrap}
 </style>"""
+
+PROMO_BANNER = """<a class="promo" href="https://t.me/khabarator" target="_blank" rel="noopener">
+<span class="emj">🗞️</span>
+<span><b>خبراتور</b><span class="txt">ما خبر رو از شایعه جدا می‌کنیم — عضو کانال تلگرام شو</span></span>
+<span class="cta">عضویت</span></a>"""
 
 DISCLAIMER = ("درصدهای «زیر قیمت» برآورد ما از قیمت منصفانهٔ هر محله/مدل‌اند و ممکن است "
               "با واقعیت بازار اختلاف داشته باشند؛ قبل از هر تصمیمی، خودتان آگهی و محله را بررسی کنید.")
@@ -205,6 +215,7 @@ def page_shell(title: str, desc: str, url: str, h1: str, sub: str,
 <meta property="og:type" content="website">
 {STYLE}</head><body>
 <header><h1>{html.escape(h1)}</h1><p>{html.escape(sub)}</p><span class="live">● فعال</span></header>
+{PROMO_BANNER}
 {nav}
 {body}
 <div class="updated">آخرین به‌روزرسانی: {html.escape(updated_fa)}</div>
@@ -255,6 +266,7 @@ INDEX_HTML = """<!doctype html><html lang="fa" dir="rtl"><head><meta charset="ut
 <meta property="og:type" content="website">
 """ + STYLE + """</head><body>
 <header><h1>🎯 شکارچی فرصت</h1><p>زیرقیمت‌های واقعی دیوار — ۳۱ مرکز استان — به‌روزرسانی خودکار هر ۳۰ دقیقه</p><span class="live">● فعال</span></header>
+""" + PROMO_BANNER + """
 __NAV__
 <div class="filters" style="display:flex;gap:8px;justify-content:center;padding:14px;flex-wrap:wrap">
 <button data-f="all" class="on" style="border:1px solid #ccc;background:#fff;border-radius:20px;padding:8px 18px;font-family:inherit;cursor:pointer">همه</button><button data-f="golden" style="border:1px solid #ccc;background:#fff;border-radius:20px;padding:8px 18px;font-family:inherit;cursor:pointer">💎 فرصت طلایی</button><button data-f="opportunity" style="border:1px solid #ccc;background:#fff;border-radius:20px;padding:8px 18px;font-family:inherit;cursor:pointer">🔥 فرصت</button>
