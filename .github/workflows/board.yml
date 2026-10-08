@@ -1,0 +1,52 @@
+---
+name: board
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+
+permissions:
+  pages: write
+  id-token: write
+
+concurrency:
+  group: board
+  cancel-in-progress: true
+
+env:
+  DEALS_DB: ${{ github.workspace }}/deals.db
+  SITE_URL: https://mhsne.github.io/shekar-forsat
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Restore deals.db snapshot
+        uses: actions/cache@v4
+        with:
+          path: deals.db
+          key: deals-db-${{ github.run_id }}
+          restore-keys: deals-db-
+
+      - name: Poll Divar + export board
+        run: |
+          pip install --quiet requests
+          python poller.py
+          python board_export.py --db deals.db --out site
+          ls -la site/
+          python -c "import json; d=json.load(open('site/deals.json')); print('deals:', d['count'], '| updated:', d['updated_fa'])"
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site/
+
+      - uses: actions/deploy-pages@v4
+---
