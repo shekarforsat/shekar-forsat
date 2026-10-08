@@ -29,11 +29,15 @@ CITY_SLUG = {
 }
 
 CATS = {
-    "house_sell": "آپارتمان فروشی", "house_rent": "آپارتمان اجاره",
-    "car": "خودرو", "motorcycle": "موتورسیکلت",
-    "mobile": "موبایل", "commercial_sell": "مغازه فروشی",
-    "commercial_rent": "مغازه اجاره",
+    "house_sell": ("foroush-maskan", "فروش مسکن", "آپارتمان و خانه زیر قیمت"),
+    "house_rent": ("ejareh-maskan", "اجاره مسکن", "آپارتمان اجاره زیر قیمت"),
+    "car": ("khodro", "خودرو", "ماشین زیر قیمت"),
+    "motorcycle": ("motorcyclet", "موتورسیکلت", "موتور زیر قیمت"),
+    "mobile": ("mobile", "موبایل", "گوشی موبایل زیر قیمت"),
+    "commercial_sell": ("melk-tejari", "ملک تجاری", "مغازه و ملک تجاری زیر قیمت"),
+    "commercial_rent": ("ejareh-tejari", "اجاره تجاری", "اجاره مغازه زیر قیمت"),
 }
+CAT_FA = {c: v[1] for c, v in CATS.items()}
 
 CAT_ICON = {"house_sell": "home", "house_rent": "home", "commercial_sell": "home",
             "commercial_rent": "home", "car": "car", "motorcycle": "car", "mobile": "digital"}
@@ -52,15 +56,37 @@ def fa_num(n):
     return s.translate(FA_DIGITS)
 
 
-def load_deals(db_path, limit=400):
+def load_deals(db_path, limit=80, city=None, category=None):
     con = sqlite3.connect(db_path)
-    con.row_factory = sqlite3.Row
-    rows = con.execute(
-        "SELECT id,title,city,category,price,fair_price,pct_below_fair,divar_token,n_comps,inserted_at"
-        " FROM deals ORDER BY pct_below_fair DESC, inserted_at DESC LIMIT ?", (limit,)
-    ).fetchall()
+    q = """SELECT token,title,category,city,district,price,tier,discount,first_seen
+           FROM ads WHERE tier IN ('golden','opportunity') AND price>0"""
+    params = []
+    if city:
+        q += " AND city=?"; params.append(city)
+    if category:
+        if category == "car":
+            q += " AND category IN ('car','cars')"
+        else:
+            q += " AND category=?"; params.append(category)
+    q += """ ORDER BY CASE tier WHEN 'golden' THEN 0 ELSE 1 END, discount DESC, first_seen DESC
+             LIMIT ?"""
+    params.append(limit)
+    rows = con.execute(q, params).fetchall()
+    counts = {(c, k): n for c, k, n in
+              con.execute("SELECT city, category, COUNT(*) FROM ads GROUP BY city, category").fetchall()}
     con.close()
-    return [dict(r) for r in rows]
+    deals = []
+    for token, title, category, city, district, price, tier, discount, _ in rows:
+        discount = discount or 0.0
+        fair = round(price / (1 - discount)) if discount > 0 else price
+        cat = "car" if category == "cars" else (category or "")
+        deals.append({
+            "divar_token": token, "title": title or "", "category": cat,
+            "city": city or "", "district": district or "",
+            "price": price, "fair_price": fair, "pct_below_fair": round(discount, 4),
+            "tier": tier, "n_comps": counts.get((city, category), 0),
+        })
+    return deals
 
 
 # --- تبدیل گریگوری به جلالی (الگوریتم چرخه‌ای استاندارد) ---
@@ -112,16 +138,17 @@ def card_html(d):
     price, fair = d["price"], d["fair_price"]
     pct = round(d["pct_below_fair"] * 100)
     w = max(4, min(100, round(price / fair * 100))) if fair else 100
-    tier = "golden" if d["pct_below_fair"] >= 0.25 else "opportunity"
+    tier = d.get("tier") or ("golden" if d["pct_below_fair"] >= 0.25 else "opportunity")
     badge = ('<span class="gold-badge">فرصت طلایی</span>' if tier == "golden"
              else '<span class="deal-badge">فرصت</span>')
     icon = ICON_SVG.get(CAT_ICON.get(d["category"], "home"), ICON_SVG["home"])
     n = d.get("n_comps")
+    loc = d.get("district") or d["city"]
     return (
         f'<a class="opportunity" data-tier="{tier}" href="https://divar.ir/v/{d["divar_token"]}"'
         f' target="_blank" rel="noopener" aria-label="{d["title"]}، {fa_num(pct)} درصد زیر قیمت">'
         f'<div class="card-top"><span class="category-icon" aria-hidden="true">{icon}</span>{badge}</div>'
-        f'<h3>{d["title"]}</h3><span class="location">{d["city"]}</span>'
+        f'<h3>{d["title"]}</h3><span class="location">{loc}</span>'
         f'<div class="price"><small>قیمت آگهی</small><strong>{fa_num(price)} تومان</strong></div>'
         f'<div class="fair-row"><span>فاصله تا قیمت منصفانه</span><strong>{fa_num(pct)}٪ پایین‌تر</strong></div>'
         f'<div class="compare"><i style="--deal:{w}%"></i></div>'
@@ -129,10 +156,17 @@ def card_html(d):
         f'<div class="card-analysis"><div class="analysis-grid">'
         f'<div><span>نمونه‌های همتا</span><strong>{fa_num(n) if n is not None else "—"} آگهی</strong></div>'
         f'<div><span>اطمینان تحلیل</span><strong>{_conf(n)}</strong></div>'
-        f'<div><span>دسته‌بندی</span><strong>{CATS.get(d["category"], "")}</strong></div>'
+        f'<div><span>دسته‌بندی</span><strong>{CAT_FA.get(d["category"], "")}</strong></div>'
         f'</div></div></a>'
     )
 
+
+def city_slug(name):
+    key = (name or "").replace("‌", "").replace(" ", "")
+    for k, v in CITY_SLUG.items():
+        if k.replace("‌", "") == key:
+            return v
+    return "other"
 STYLE = """
     :root {
       color-scheme: light dark;
@@ -540,22 +574,31 @@ STYLE = """
 """
 
 
-def nav_html(active_city=None, active_cat=None):
-    city_chips = ['<a class="chip%s" href="%s">%s</a>' % (
-        " on" if active_city == c else "",
-        ("index.html" if c == "tehran" else f"city-{CITY_SLUG[c]}.html") if c != active_city else "#",
-        "تهران" if c == "tehran" else c) for c in
-        ["تهران", "آذربایجان شرقی", "اصفهان", "فارس", "خراسان رضوی", "خوزستان", "گیلان", "مازندران"]]
-    cat_chips = ['<a class="chip%s" href="%s">%s</a>' % (
-        " on" if active_cat == k else "",
-        ("index.html" if k is None else f"cat-{k}.html"),
-        ("همه" if k is None else CATS[k])) for k in [None] + list(CATS)]
+SITE_URL = os.environ.get("SITE_URL", "https://shekarforsat.github.io/shekar-forsat").rstrip("/")
+
+DISCLAIMER = ("درصدهای «زیر قیمت» برآورد ما از قیمت منصفانهٔ هر محله/مدل‌اند و ممکن است "
+              "با واقعیت بازار اختلاف داشته باشند؛ قبل از هر تصمیمی، خودتان آگهی و محله را بررسی کنید.")
+
+
+def nav_html(cities, cats, prefix="", active_city=None, active_cat=None):
+    home = f'<a class="chip%s" href="%sindex.html">همه</a>' % (
+        "" if (active_city or active_cat) else " on", prefix)
+    city_chips = "".join(
+        '<a class="chip%s" href="%scity/%s.html">%s</a>' % (
+            " on" if active_city == c else "", prefix, city_slug(c), c)
+        for c in cities)
+    cat_chips = "".join(
+        '<a class="chip%s" href="%scat/%s.html">%s</a>' % (
+            " on" if active_cat == k else "", prefix, CATS[k][0], CATS[k][1])
+        for k in cats)
     return ('<nav class="nav" aria-label="ناوبری"><div class="nav-row">'
-            + "".join(city_chips) + "".join(cat_chips) + "</div></nav>")
+            + home + cat_chips + city_chips + "</div></nav>")
 
 
 FOOT = ('<footer class="foot"><span>قاپ — موتور شکار فرصت‌های زیرقیمت</span>'
-        '<span class="updated" id="updated"></span></footer>')
+        '<span class="updated" id="updated"></span>'
+        '<span style="flex-basis:100%;font-size:.75rem">DISCLAIMER_TXT</span></footer>').replace(
+            "DISCLAIMER_TXT", DISCLAIMER)
 
 
 INDEX_HTML = """<!doctype html>
@@ -663,19 +706,20 @@ INDEX_HTML = """<!doctype html>
 {FOOT}
 <script>
 const ICONS = {ICONS_JS};
-const CATS = {CATS_JS};
+const CATFA = {CATFA_JS};
 const faD = s => String(s).replace(/\\d/g, d => "۰۱۲۳۴۵۶۷۸۹"[d]);
 const faN = n => faD(Number(n).toLocaleString("en-US"));
 const conf = n => n == null ? "نامشخص" : n >= 50 ? "بالا" : n >= 15 ? "خوب" : "پایه";
 function card(d){
   const pct = Math.round(d.pct_below_fair*100);
   const w = d.fair_price ? Math.max(4, Math.min(100, Math.round(d.price/d.fair_price*100))) : 100;
-  const golden = d.pct_below_fair >= 0.25;
+  const golden = d.tier === "golden";
   const badge = golden ? '<span class="gold-badge">فرصت طلایی</span>' : '<span class="deal-badge">فرصت</span>';
   const icon = {"home":ICONS.home,"car":ICONS.car,"digital":ICONS.digital}[d.icon||"home"];
-  return '<a class="opportunity" data-tier="'+(golden?"golden":"opportunity")+'" href="https://divar.ir/v/'+d.divar_token+'" target="_blank" rel="noopener" aria-label="'+d.title+'، '+faN(pct)+' درصد زیر قیمت">'
+  const loc = d.district || d.city;
+  return '<a class="opportunity" data-tier="'+d.tier+'" href="https://divar.ir/v/'+d.divar_token+'" target="_blank" rel="noopener" aria-label="'+d.title+'، '+faN(pct)+' درصد زیر قیمت">'
     +'<div class="card-top"><span class="category-icon" aria-hidden="true">'+icon+'</span>'+badge+'</div>'
-    +'<h3>'+d.title+'</h3><span class="location">'+d.city+'</span>'
+    +'<h3>'+d.title+'</h3><span class="location">'+loc+'</span>'
     +'<div class="price"><small>قیمت آگهی</small><strong>'+faN(d.price)+' تومان</strong></div>'
     +'<div class="fair-row"><span>فاصله تا قیمت منصفانه</span><strong>'+faN(pct)+'٪ پایین‌تر</strong></div>'
     +'<div class="compare"><i style="--deal:'+w+'%"></i></div>'
@@ -683,7 +727,7 @@ function card(d){
     +'<div class="card-analysis"><div class="analysis-grid">'
     +'<div><span>نمونه‌های همتا</span><strong>'+(d.n_comps==null?"—":faN(d.n_comps))+' آگهی</strong></div>'
     +'<div><span>اطمینان تحلیل</span><strong>'+conf(d.n_comps)+'</strong></div>'
-    +'<div><span>دسته‌بندی</span><strong>'+(CATS[d.category]||"")+'</strong></div>'
+    +'<div><span>دسته‌بندی</span><strong>'+(CATFA[d.category]||"")+'</strong></div>'
     +'</div></div></a>';
 }
 let ALL = [];
@@ -692,7 +736,7 @@ fetch("deals.json").then(r=>r.json()).then(j=>{
   ALL = ds;
   document.getElementById("grid").innerHTML = ds.slice(0,60).map(card).join("") || '<div class="empty">فعلاً آگهی زیرقیمتی ثبت نشده.</div>';
   document.getElementById("live-count").textContent = faN(j.count || ds.length);
-  const g = ds.find(d=>d.pct_below_fair>=0.25) || ds[0];
+  const g = ds.find(d=>d.tier==="golden") || ds[0];
   if (g) document.getElementById("latest-hunt").textContent = g.title + " · " + faN(Math.round(g.pct_below_fair*100)) + "٪ زیر قیمت";
   const u = document.getElementById("updated");
   if (u) u.textContent = "آخرین به‌روزرسانی: " + j.updated_fa;
@@ -701,7 +745,7 @@ document.querySelectorAll(".filter").forEach(b=>b.addEventListener("click",()=>{
   document.querySelectorAll(".filter").forEach(x=>x.setAttribute("aria-pressed","false"));
   b.setAttribute("aria-pressed","true");
   const t = b.dataset.tier;
-  const list = t==="all" ? ALL : ALL.filter(d => (d.pct_below_fair>=0.25?"golden":"opportunity")===t);
+  const list = t==="all" ? ALL : ALL.filter(d => d.tier===t);
   document.getElementById("grid").innerHTML = list.slice(0,60).map(card).join("") || '<div class="empty">موردی در این گروه نیست.</div>';
 }));
 </script>
@@ -716,6 +760,7 @@ PAGE_HTML = """<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
 <meta name="color-scheme" content="light dark"/>
 <title>{TITLE} | قاپ</title>
+<meta name="description" content="{DESC}"/>
 <link rel="icon" href="data:,"/>
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
@@ -723,7 +768,7 @@ PAGE_HTML = """<!doctype html>
 <style>{STYLE}</style>
 </head>
 <body>
-<header class="topbar"><a class="brand" href="index.html">قاپ<small>شکار فرصت‌های زیرقیمت</small></a>{NAV}</header>
+<header class="topbar"><a class="brand" href="../index.html">قاپ<small>شکار فرصت‌های زیرقیمت</small></a>{NAV}</header>
 <main>
 <div class="page-head"><span class="eyebrow">{EYEBROW}</span><h1>{H1}</h1><p class="intro">{INTRO}</p></div>
 <section class="board-section"><div class="board-shell"><div class="cards">{CARDS}</div></div></section>
@@ -734,70 +779,84 @@ PAGE_HTML = """<!doctype html>
 """
 
 
-def build(db_path, out_path, limit=400):
-    deals = load_deals(db_path, limit)
-    os.makedirs(out_path, exist_ok=True)
+def build(db_path, out_path, limit=80):
+    con = sqlite3.connect(db_path)
+    cities = [r[0] for r in con.execute(
+        "SELECT DISTINCT city FROM ads WHERE tier IN ('golden','opportunity') AND city IS NOT NULL").fetchall()]
+    cats = [("car" if r[0] == "cars" else r[0]) for r in con.execute(
+        "SELECT DISTINCT category FROM ads WHERE tier IN ('golden','opportunity')").fetchall()
+        if ("car" if r[0] == "cars" else r[0]) in CATS]
+    con.close()
+    cities.sort()
+    cats.sort(key=lambda c: list(CATS).index(c))
+
     updated_fa = tehran_now_fa()
-    icons_js = json.dumps({k: v for k, v in ICON_SVG.items()})
-    cats_js = json.dumps(CATS)
-    enriched = []
+    nav = nav_html(cities, cats)
+    urls = [f"{SITE_URL}/"]
+    os.makedirs(out_path, exist_ok=True)
+    os.makedirs(os.path.join(out_path, "city"), exist_ok=True)
+    os.makedirs(os.path.join(out_path, "cat"), exist_ok=True)
+
+    deals = load_deals(db_path, limit)
     for d in deals:
-        e = dict(d)
-        e["icon"] = CAT_ICON.get(d["category"], "home")
-        enriched.append(e)
+        d["icon"] = CAT_ICON.get(d["category"], "home")
+    payload = {"deals": deals, "updated_fa": updated_fa, "count": len(deals)}
     with open(os.path.join(out_path, "deals.json"), "w", encoding="utf-8") as f:
-        json.dump({"deals": enriched, "updated_fa": updated_fa, "count": len(enriched)},
-                  f, ensure_ascii=False)
-    nav = nav_html()
+        json.dump(payload, f, ensure_ascii=False)
+
     idx = INDEX_HTML.replace("{STYLE}", STYLE).replace("{NAV}", nav).replace("{FOOT}", FOOT)
-    idx = idx.replace("{ICONS_JS}", icons_js).replace("{CATS_JS}", cats_js)
+    idx = idx.replace("{ICONS_JS}", json.dumps(ICON_SVG)).replace("{CATFA_JS}", json.dumps(CAT_FA))
     idx = idx.replace('id="updated"></span>', f'id="updated">آخرین به‌روزرسانی: {updated_fa}</span>')
     with open(os.path.join(out_path, "index.html"), "w", encoding="utf-8") as f:
         f.write(idx)
 
-    for city, slug in CITY_SLUG.items():
-        ds = [d for d in deals if d["city"] == city][:60]
-        cards = "".join(card_html(d) for d in ds) or '<div class="empty">فعلاً آگهی زیرقیمتی در این شهر ثبت نشده.</div>'
-        pg = PAGE_HTML.replace("{TITLE}", f"فرصت‌های {city}").replace("{STYLE}", STYLE)
-        pg = pg.replace("{NAV}", nav_html(active_city=city)).replace("{FOOT}", FOOT)
-        pg = pg.replace("{EYEBROW}", "فرصت‌های شهری").replace("{H1}", f"فرصت‌های زیرقیمت {city}")
-        pg = pg.replace("{INTRO}", f"{len(ds)} آگهی زیرقیمت در {city} — با مقایسه قیمت آگهی و برآورد منصفانه بازار.")
+    for city in cities:
+        cdeals = load_deals(db_path, 60, city=city)
+        slug = city_slug(city)
+        cards = "".join(card_html(d) for d in cdeals) or '<div class="empty">فعلاً آگهی زیرقیمتی در این شهر ثبت نشده.</div>'
+        pg = PAGE_HTML.replace("{TITLE}", f"فرصت‌های {city}").replace("{DESC}", f"آگهی‌های زیرقیمت {city} در قاپ")
+        pg = pg.replace("{STYLE}", STYLE).replace("{NAV}", nav_html(cities, cats, prefix="../", active_city=city))
+        pg = pg.replace("{FOOT}", FOOT).replace("{EYEBROW}", "فرصت‌های شهری")
+        pg = pg.replace("{H1}", f"فرصت‌های زیرقیمت {city}")
+        pg = pg.replace("{INTRO}", f"{fa_num(len(cdeals))} آگهی زیرقیمت در {city} — با مقایسه قیمت آگهی و برآورد منصفانه بازار.")
         pg = pg.replace("{CARDS}", cards)
         pg = pg.replace('id="updated"></span>', f'id="updated">آخرین به‌روزرسانی: {updated_fa}</span>')
-        with open(os.path.join(out_path, f"city-{slug}.html"), "w", encoding="utf-8") as f:
+        with open(os.path.join(out_path, "city", f"{slug}.html"), "w", encoding="utf-8") as f:
             f.write(pg)
+        urls.append(f"{SITE_URL}/city/{slug}.html")
 
-    for ck, cn in CATS.items():
-        ds = [d for d in deals if d["category"] == ck][:60]
-        cards = "".join(card_html(d) for d in ds) or '<div class="empty">فعلاً آگهی زیرقیمتی در این دسته ثبت نشده.</div>'
-        pg = PAGE_HTML.replace("{TITLE}", cn).replace("{STYLE}", STYLE)
-        pg = pg.replace("{NAV}", nav_html(active_cat=ck)).replace("{FOOT}", FOOT)
-        pg = pg.replace("{EYEBROW}", "فرصت‌های دسته‌بندی").replace("{H1}", f"فرصت‌های {cn}")
-        pg = pg.replace("{INTRO}", f"{len(ds)} آگهی زیرقیمت در دسته {cn}.")
+    for cat in cats:
+        code = cat if cat != "cars" else "car"
+        cdeals = load_deals(db_path, 60, category=cat)
+        slug = CATS[code][0]
+        cards = "".join(card_html(d) for d in cdeals) or '<div class="empty">فعلاً آگهی زیرقیمتی در این دسته ثبت نشده.</div>'
+        pg = PAGE_HTML.replace("{TITLE}", CATS[code][1]).replace("{DESC}", CATS[code][2])
+        pg = pg.replace("{STYLE}", STYLE).replace("{NAV}", nav_html(cities, cats, prefix="../", active_cat=code))
+        pg = pg.replace("{FOOT}", FOOT).replace("{EYEBROW}", "فرصت‌های دسته‌بندی")
+        pg = pg.replace("{H1}", f"فرصت‌های {CATS[code][1]}")
+        pg = pg.replace("{INTRO}", f"{fa_num(len(cdeals))} آگهی زیرقیمت در دسته {CATS[code][1]}.")
         pg = pg.replace("{CARDS}", cards)
         pg = pg.replace('id="updated"></span>', f'id="updated">آخرین به‌روزرسانی: {updated_fa}</span>')
-        with open(os.path.join(out_path, f"cat-{ck}.html"), "w", encoding="utf-8") as f:
+        with open(os.path.join(out_path, "cat", f"{slug}.html"), "w", encoding="utf-8") as f:
             f.write(pg)
+        urls.append(f"{SITE_URL}/cat/{slug}.html")
 
-    urls = ["https://shekarforsat.github.io/shekar-forsat/"]
-    for slug in CITY_SLUG.values():
-        urls.append(f"https://shekarforsat.github.io/shekar-forsat/city-{slug}.html")
-    for ck in CATS:
-        urls.append(f"https://shekarforsat.github.io/shekar-forsat/cat-{ck}.html")
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     sm = ('<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
-          + "".join(f"<url><loc>{u}</loc></url>\n" for u in urls) + "</urlset>")
+          + "".join(f"<url><loc>{u}</loc><lastmod>{today}</lastmod></url>\n" for u in urls) + "</urlset>")
     with open(os.path.join(out_path, "sitemap.xml"), "w", encoding="utf-8") as f:
         f.write(sm)
     with open(os.path.join(out_path, "robots.txt"), "w", encoding="utf-8") as f:
-        f.write("User-agent: *\nAllow: /\nSitemap: https://shekarforsat.github.io/shekar-forsat/sitemap.xml\n")
-    print(f"built {len(deals)} deals -> {out_path} at {updated_fa}")
+        f.write(f"User-agent: *\nAllow: /\nSitemap: {SITE_URL}/sitemap.xml\n")
+    print(f"exported {len(deals)} deals -> {out_path}/ "
+          f"({len(cities)} city pages, {len(cats)} cat pages, {len(urls)} urls, updated {updated_fa})")
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--db", default=DB_DEFAULT)
     ap.add_argument("--out", default=OUT_DEFAULT)
-    ap.add_argument("--limit", type=int, default=400)
+    ap.add_argument("--limit", type=int, default=80)
     args = ap.parse_args()
     build(args.db, args.out, args.limit)
 
