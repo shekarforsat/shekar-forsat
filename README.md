@@ -1,4 +1,4 @@
-# 🎯 شکارچی فرصت
+# 🎯 قاپ
 
 برد عمومی زیرقیمت‌های واقعی دیوار — ۳۱ مرکز استان ایران.
 
@@ -8,4 +8,4 @@
 - `engine.py` — موتور امتیازدهی (۱۵٪+ فرصت، ۲۲٪+ فرصت طلایی)
 - `board_export.py` — ساخت برد استاتیک + صفحات سئو + sitemap
 
-آدرس برد: https://mhsne.github.io/shekar-forsat/
+آدرس برد: https://shekarforsat.github.io/shekar-forsat/

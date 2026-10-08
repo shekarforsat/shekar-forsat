@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""خروجی استاتیک برد «شکارچی فرصت» برای هاست رایگان (GitHub Pages).
+"""خروجی استاتیک برد «قاپ» برای هاست رایگان (GitHub Pages).
 
 از deals.db می‌خواند و می‌سازد:
   site/index.html        برد اصلی
@@ -228,13 +228,13 @@ def page_shell(title: str, desc: str, url: str, h1: str, sub: str,
 {body}
 <div class="updated">آخرین به‌روزرسانی: {html.escape(updated_fa)}</div>
 <p class="note">{html.escape(DISCLAIMER)}</p>
-<footer>شکارچی فرصت — زیرقیمت‌های واقعی دیوار، هر ۳۰ دقیقه تازه‌سازی می‌شود.</footer>
+<footer>قاپ — زیرقیمت‌های واقعی دیوار، هر ۳۰ دقیقه تازه‌سازی می‌شود.</footer>
 </body></html>"""
 
 
 def build_city_page(city: str, deals: list[dict], nav: str, updated_fa: str) -> str:
     gold = sum(1 for d in deals if d["tier"] == "golden")
-    title = f"زیرقیمت‌های دیوار {city} | شکارچی فرصت"
+    title = f"زیرقیمت‌های دیوار {city} | قاپ"
     desc = (f"آگهی‌های زیر قیمت واقعی دیوار {city} — آپارتمان، خودرو، موبایل و ملک تجاری. "
             f"{fa_num(len(deals))} فرصت فعال ({fa_num(gold)} طلایی)، به‌روزرسانی هر ۳۰ دقیقه.")
     cards = "".join(card_html(d) for d in deals) or '<div class="empty">هنوز فرصت تازه‌ای ثبت نشده — چند دقیقه دیگر سر بزن.</div>'
@@ -251,7 +251,7 @@ def build_city_page(city: str, deals: list[dict], nav: str, updated_fa: str) -> 
 
 def build_cat_page(cat: str, deals: list[dict], nav: str, updated_fa: str) -> str:
     slug, fa_name, seo_phrase = CATS[cat]
-    title = f"{seo_phrase} در دیوار | شکارچی فرصت"
+    title = f"{seo_phrase} در دیوار | قاپ"
     desc = (f"{seo_phrase} — آگهی‌های واقعی دیوار که از قیمت منصفانه پایین‌ترند، در ۳۱ مرکز استان. "
             f"به‌روزرسانی هر ۳۰ دقیقه.")
     cards = "".join(card_html(d) for d in deals) or '<div class="empty">هنوز فرصت تازه‌ای ثبت نشده — چند دقیقه دیگر سر بزن.</div>'
@@ -267,14 +267,14 @@ def build_cat_page(cat: str, deals: list[dict], nav: str, updated_fa: str) -> st
 
 INDEX_HTML = """<!doctype html><html lang="fa" dir="rtl"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>شکارچی فرصت | زیرقیمت‌های واقعی دیوار در ۳۱ مرکز استان</title>
+<title>قاپ | زیرقیمت‌های واقعی دیوار در ۳۱ مرکز استان</title>
 <meta name="description" content="آگهی‌های زیر قیمت واقعی دیوار — آپارتمان، خودرو، موتورسیکلت، موبایل و ملک تجاری در ۳۱ مرکز استان ایران. به‌روزرسانی خودکار هر ۳۰ دقیقه.">
-<meta property="og:title" content="شکارچی فرصت | زیرقیمت‌های واقعی دیوار">
+<meta property="og:title" content="قاپ | زیرقیمت‌های واقعی دیوار">
 <meta property="og:description" content="آپارتمان، خودرو، موبایل و ملک تجاری زیر قیمت — ۳۱ مرکز استان، هر ۳۰ دقیقه تازه‌سازی.">
 <meta property="og:type" content="website">
 """ + STYLE + """</head><body>
-<header><h1>🎯 شکارچی فرصت</h1><p>زیرقیمت‌های واقعی دیوار — ۳۱ مرکز استان — به‌روزرسانی خودکار هر ۳۰ دقیقه</p><span class="live">● فعال</span></header>
-<div class="aihero"><img src="assets/ai-hero.jpg" alt="هوش مصنوعی شکارچی فرصت"><div class="ov"><span class="aibadge">🤖 قدرت‌گرفته از هوش مصنوعی</span><h2>هوش مصنوعی، فرصت‌های طلایی را شکار می‌کند</h2><p>موتور هوشمند ما هر ۳۰ دقیقه هزاران آگهی دیوار را می‌خواند، قیمت هر محله و مدل را می‌سنجد و فقط واقعی‌ترین زیرقیمت‌ها را اینجا می‌گذارد.</p></div></div>
+<header><h1>🎯 قاپ</h1><p>فرصت رو قاپ بزن — زیرقیمت‌های واقعی دیوار در ۳۱ مرکز استان — هر ۳۰ دقیقه تازه‌سازی</p><span class="live">● فعال</span></header>
+<div class="aihero"><img src="assets/ai-hero.jpg" alt="هوش مصنوعی قاپ"><div class="ov"><span class="aibadge">🤖 قدرت‌گرفته از هوش مصنوعی</span><h2>هوش مصنوعی قاپ، فرصت‌های طلایی را شکار می‌کند</h2><p>موتور هوشمند ما هر ۳۰ دقیقه هزاران آگهی دیوار را می‌خواند، قیمت هر محله و مدل را می‌سنجد و فقط واقعی‌ترین زیرقیمت‌ها را اینجا می‌گذارد.</p></div></div>
 """ + PROMO_BANNER + """
 __NAV__
 <div class="filters" style="display:flex;gap:8px;justify-content:center;padding:14px;flex-wrap:wrap">
@@ -283,7 +283,7 @@ __NAV__
 <div class="grid" id="grid"></div>
 <div class="updated" id="updated"></div>
 <p class="note">__DISCLAIMER__</p>
-<footer style="text-align:center;color:#666;font-size:12px;padding:18px;border-top:1px solid #eee;background:#fff">شکارچی فرصت — زیرقیمت‌های واقعی دیوار، هر ۳۰ دقیقه تازه‌سازی می‌شود.</footer>
+<footer style="text-align:center;color:#666;font-size:12px;padding:18px;border-top:1px solid #eee;background:#fff">قاپ — زیرقیمت‌های واقعی دیوار، هر ۳۰ دقیقه تازه‌سازی می‌شود.</footer>
 <script>
 const FA="۰۱۲۳۴۵۶۷۸۹", fa=n=>String(n).replace(/\\d/g,d=>FA[d]);
 const CAT={house_sell:"🏠 فروش",house_rent:"🔑 اجاره",car:"🚗 خودرو",motorcycle:"🏍 موتور",mobile:"📱 موبایل",commercial_sell:"🏢 تجاری",commercial_rent:"🏢 اجاره تجاری"};
