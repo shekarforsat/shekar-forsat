@@ -1,0 +1,5 @@
+deals.db
+__pycache__/
+venv/
+*.pyc
+site/
