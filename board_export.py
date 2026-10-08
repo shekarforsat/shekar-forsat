@@ -10,7 +10,7 @@ import json, math, os, re, sys
 from datetime import datetime, timezone, timedelta
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DB = os.path.join(ROOT, "db.sqlite3")
+DB = os.path.join(ROOT, "deals.db")
 OUT = os.path.join(ROOT, "site")
 
 TEHRAN = timezone(timedelta(hours=3, minutes=30))
