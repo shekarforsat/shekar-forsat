@@ -1,13 +1,19 @@
 #!/usr/bin/env python3
-"""board_export.py — static-site generator for Shekar Forsat (قاپ) v3.
+"""board_export.py — static-site generator for Shekar Forsat (قاپ) v4.
 
-Redesign v3 port: elevated design system (hero + radar console, live board
-with rich cards, anatomy, method, closing), Persian RTL, dark/light aware.
-Cards are <a> links to divar.ir, server-rendered per page + JS hydration
-on the homepage from deals.json.
+Dallal-style redesign (Mohsen's order, 2026-10-09): newspaper aesthetic —
+cream paper, petrol ink, lime highlighter accents, giant headlines, rule
+lines, flat cards. Persian RTL, dark "newspaper night" mode, live ticker,
+count-up hero numbers, rotating feature card, quick city/category filters,
+search, and a localStorage-backed "my list" drawer.
+
+Architecture (unchanged from v3): reads the `ads` table from SQLite,
+writes index.html + city/<slug>.html + cat/<slug>.html + deals.json
+(a dict with a deals list), sitemap.xml and robots.txt.
+CLI: --db/--out/--limit.
 """
 import argparse
-import json, math, os, re, sqlite3, sys
+import json, os, sqlite3
 from datetime import datetime, timezone, timedelta
 
 DB_DEFAULT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "deals.db")
@@ -42,10 +48,20 @@ CAT_FA = {c: v[1] for c, v in CATS.items()}
 CAT_ICON = {"house_sell": "home", "house_rent": "home", "commercial_sell": "home",
             "commercial_rent": "home", "car": "car", "motorcycle": "car", "mobile": "digital"}
 
+# Stroke-icon inner paths (viewBox 0 0 96 96) in the dallal sample's hand-drawn style.
+ICON_PATHS = {
+    "home": ('<path d="M16 44 48 18l32 26v34H58V57H38v21H16V44Z"/>'
+              '<path d="M64 24V13h10v19"/>'),
+    "car": ('<path d="M17 55h62l-7-22H31L17 55Z"/>'
+             '<path d="M11 55v16h8m60-16v16h-8M27 71h44"/>'
+             '<circle cx="28" cy="70" r="7"/><circle cx="65" cy="70" r="7"/>'),
+    "digital": ('<rect x="21" y="16" width="55" height="45" rx="3"/>'
+                 '<path d="M12 69h73l-5 9H17l-5-9Z"/>'),
+}
 ICON_SVG = {
-    "home": ('<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 11.5L12 5l8 6.5V20H4v-8.5zM9.5 20v-5h5v5" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>'),
-    "car": ('<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 16l1.2-5.2A2.4 2.4 0 018.5 9h7a2.4 2.4 0 012.3 1.8L19 16M4 16h16v3H4z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><circle cx="7" cy="18.5" r="1" fill="currentColor"/><circle cx="17" cy="18.5" r="1" fill="currentColor"/></svg>'),
-    "digital": ('<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="6" y="3" width="12" height="18" rx="2" stroke="currentColor" stroke-width="1.8"/><path d="M10 17h4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>'),
+    k: ('<svg viewBox="0 0 96 96" fill="none" stroke="currentColor" stroke-width="3" '
+        'stroke-linejoin="round" aria-hidden="true">' + v + '</svg>')
+    for k, v in ICON_PATHS.items()
 }
 
 FA_DIGITS = str.maketrans("0123456789", "۰۱۲۳۴۵۶۷۸۹")
@@ -82,9 +98,11 @@ def load_deals(db_path, limit=80, city=None, category=None):
         cat = "car" if category == "cars" else (category or "")
         deals.append({
             "divar_token": token, "title": title or "", "category": cat,
-            "city": city or "", "district": district or "",
+            "cat_fa": CAT_FA.get(cat, cat), "city": city or "", "district": district or "",
             "price": price, "fair_price": fair, "pct_below_fair": round(discount, 4),
             "tier": tier, "n_comps": counts.get((city, category), 0),
+            "icon": CAT_ICON.get(cat, "home"),
+            "url": "https://divar.ir/v/" + token,
         })
     return deals
 
@@ -127,38 +145,10 @@ def tehran_now_fa():
     return f"{fa_num(jd)} {JMONTHS[jm]} {fa_num(jy)} — ساعت {fa_num(f'{now.hour:02d}:{now.minute:02d}')}"
 
 
-
 def _conf(n):
     if n is None:
         return "نامشخص"
     return "بالا" if n >= 50 else ("خوب" if n >= 15 else "پایه")
-
-
-def card_html(d):
-    price, fair = d["price"], d["fair_price"]
-    pct = round(d["pct_below_fair"] * 100)
-    w = max(4, min(100, round(price / fair * 100))) if fair else 100
-    tier = d.get("tier") or ("golden" if d["pct_below_fair"] >= 0.25 else "opportunity")
-    badge = ('<span class="gold-badge">فرصت طلایی</span>' if tier == "golden"
-             else '<span class="deal-badge">فرصت</span>')
-    icon = ICON_SVG.get(CAT_ICON.get(d["category"], "home"), ICON_SVG["home"])
-    n = d.get("n_comps")
-    loc = d.get("district") or d["city"]
-    return (
-        f'<a class="opportunity" data-tier="{tier}" href="https://divar.ir/v/{d["divar_token"]}"'
-        f' target="_blank" rel="noopener" aria-label="{d["title"]}، {fa_num(pct)} درصد زیر قیمت">'
-        f'<div class="card-top"><span class="category-icon" aria-hidden="true">{icon}</span>{badge}</div>'
-        f'<h3>{d["title"]}</h3><span class="location">{loc}</span>'
-        f'<div class="price"><small>قیمت آگهی</small><strong>{fa_num(price)} تومان</strong></div>'
-        f'<div class="fair-row"><span>فاصله تا قیمت منصفانه</span><strong>{fa_num(pct)}٪ پایین‌تر</strong></div>'
-        f'<div class="compare"><i style="--deal:{w}%"></i></div>'
-        f'<div class="fair-value"><span>آگهی: {fa_num(price)}</span><span>منصفانه: {fa_num(fair)}</span></div>'
-        f'<div class="card-analysis"><div class="analysis-grid">'
-        f'<div><span>نمونه‌های همتا</span><strong>{fa_num(n) if n is not None else "—"} آگهی</strong></div>'
-        f'<div><span>اطمینان تحلیل</span><strong>{_conf(n)}</strong></div>'
-        f'<div><span>دسته‌بندی</span><strong>{CAT_FA.get(d["category"], "")}</strong></div>'
-        f'</div></div></a>'
-    )
 
 
 def city_slug(name):
@@ -167,411 +157,6 @@ def city_slug(name):
         if k.replace("‌", "") == key:
             return v
     return "other"
-STYLE = """
-    :root {
-      color-scheme: light dark;
-      --paper: #f1f3f6;
-      --paper-2: #e9edf2;
-      --surface: #ffffff;
-      --surface-raised: #ffffff;
-      --ink: #07162c;
-      --muted: #586578;
-      --soft: #7c8797;
-      --line: #cfd6df;
-      --line-strong: #aab5c3;
-      --accent: #0066ee;
-      --accent-strong: #0055c9;
-      --accent-soft: #e3efff;
-      --green: #087552;
-      --green-soft: #e4f7ef;
-      --gold: #9c6400;
-      --gold-soft: #fff2ce;
-      --navy: #06142a;
-      --navy-2: #0c203f;
-      --navy-line: #29415f;
-      --white: #f7faff;
-      --max: 1240px;
-      --shadow: 0 26px 70px rgba(17, 37, 67, .15), 0 5px 18px rgba(17, 37, 67, .08);
-      --shadow-hover: 0 38px 86px rgba(13, 36, 72, .21), 0 10px 30px rgba(13, 36, 72, .11);
-    }
-    @media (prefers-color-scheme: dark) {
-      :root {
-        --paper: #080c13;
-        --paper-2: #0c121c;
-        --surface: #111925;
-        --surface-raised: #141e2d;
-        --ink: #f2f6fc;
-        --muted: #aeb9c9;
-        --soft: #8795a8;
-        --line: #2c394b;
-        --line-strong: #506079;
-        --accent: #6ba7ff;
-        --accent-strong: #98c2ff;
-        --accent-soft: #152d50;
-        --green: #71ddb5;
-        --green-soft: #10372b;
-        --gold: #ffd36f;
-        --gold-soft: #3f3010;
-        --navy: #030914;
-        --navy-2: #0a1a33;
-        --navy-line: #2d4565;
-        --white: #f5f8fd;
-        --shadow: 0 30px 72px rgba(0, 0, 0, .45), 0 5px 20px rgba(0, 0, 0, .24);
-        --shadow-hover: 0 42px 92px rgba(0, 0, 0, .58), 0 12px 32px rgba(0, 0, 0, .30);
-      }
-    }
-    * { box-sizing: border-box; }
-    html { scroll-behavior: smooth; }
-    body {
-      margin: 0;
-      min-width: 320px;
-      overflow-x: hidden;
-      background: var(--paper);
-      color: var(--ink);
-      font-family: "Vazirmatn", Tahoma, sans-serif;
-      -webkit-font-smoothing: antialiased;
-    }
-    button, a { font: inherit; }
-    a { color: inherit; }
-    ::selection { background: var(--accent); color: #fff; }
-
-    .hero {
-      position: relative;
-      isolation: isolate;
-      overflow: hidden;
-      min-height: min(960px, 100svh);
-      padding: clamp(52px, 7vw, 90px) max(24px, env(safe-area-inset-right)) clamp(76px, 9vw, 116px) max(24px, env(safe-area-inset-left));
-      border-bottom: 1px solid var(--line);
-      background:
-        radial-gradient(circle at 15% 20%, color-mix(in srgb, var(--accent) 12%, transparent), transparent 32%),
-        var(--paper);
-    }
-    .hero::before {
-      content: "";
-      position: absolute;
-      inset: 0;
-      z-index: -1;
-      pointer-events: none;
-      opacity: .38;
-      background-image: linear-gradient(var(--line) 1px, transparent 1px), linear-gradient(90deg, var(--line) 1px, transparent 1px);
-      background-size: 88px 88px;
-      mask-image: linear-gradient(to bottom, #000, transparent 72%);
-    }
-    .hero-inner {
-      width: min(100%, var(--max));
-      margin: 0 auto;
-      display: grid;
-      grid-template-columns: minmax(0, 1.04fr) minmax(460px, .96fr);
-      gap: clamp(52px, 7vw, 104px);
-      align-items: center;
-    }
-    .signal {
-      display: inline-flex;
-      align-items: center;
-      gap: 10px;
-      min-height: 42px;
-      margin-bottom: clamp(18px, 3vw, 28px);
-      color: var(--accent);
-      font-size: .85rem;
-      font-weight: 800;
-    }
-    .signal i { width: 8px; height: 8px; border-radius: 50%; background: currentColor; box-shadow: 0 0 0 5px var(--accent-soft); }
-    h1 {
-      margin: 0;
-      max-width: 8.2ch;
-      font-size: clamp(4.4rem, 9vw, 9.3rem);
-      line-height: .91;
-      letter-spacing: -.082em;
-      font-weight: 900;
-    }
-    h1 .outline {
-      display: block;
-      color: transparent;
-      -webkit-text-stroke: 2px var(--accent);
-      text-stroke: 2px var(--accent);
-    }
-    .lead {
-      max-width: 570px;
-      margin: clamp(30px, 4vw, 44px) 0 0;
-      color: var(--muted);
-      font-size: clamp(1rem, 1.35vw, 1.2rem);
-      line-height: 2;
-    }
-    .hero-actions { display: flex; flex-wrap: wrap; gap: 11px; margin-top: 32px; }
-    .primary, .secondary {
-      min-height: 54px;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      gap: 10px;
-      padding: 0 22px;
-      border: 1px solid;
-      border-radius: 11px;
-      text-decoration: none;
-      font-weight: 750;
-      transition: transform 180ms ease-out, box-shadow 180ms ease-out, background-color 150ms ease-out, border-color 150ms ease-out, color 150ms ease-out;
-    }
-    .primary { background: #0066ee; border-color: #0066ee; color: #fff; box-shadow: 0 10px 28px rgba(0, 102, 238, .24); }
-    .primary:hover { transform: translateY(-2px); background: #0055c9; border-color: #0055c9; box-shadow: 0 16px 34px rgba(0, 102, 238, .31); }
-    .secondary { background: var(--surface); border-color: var(--line); color: var(--ink); }
-    .secondary:hover { transform: translateY(-2px); border-color: var(--accent); color: var(--accent); }
-    .primary:focus-visible, .secondary:focus-visible, .filter:focus-visible, .opportunity:focus-visible { outline: 3px solid color-mix(in srgb, var(--accent) 38%, transparent); outline-offset: 4px; }
-    .arrow { width: 18px; height: 18px; }
-
-    .hero-console { position: relative; min-width: 0; padding: 28px 0 0 28px; }
-    .hero-console::before {
-      content: "";
-      position: absolute;
-      inset: 0 auto auto 0;
-      width: 44%;
-      height: 45%;
-      border-top: 2px solid var(--accent);
-      border-left: 2px solid var(--accent);
-    }
-    .console {
-      position: relative;
-      overflow: hidden;
-      border: 1px solid var(--line-strong);
-      background: var(--surface);
-      box-shadow: var(--shadow);
-    }
-    .console-head { min-height: 68px; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 22px; border-bottom: 1px solid var(--line); }
-    .console-title { display: flex; align-items: center; gap: 10px; font-size: .86rem; font-weight: 850; }
-    .console-title i { width: 9px; height: 9px; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 5px var(--green-soft); animation: breathe 2.4s ease-in-out infinite; }
-    .console-head span { color: var(--soft); font-size: .73rem; }
-    .radar { position: relative; height: 318px; overflow: hidden; background: var(--navy); color: var(--white); }
-    .radar-grid { position: absolute; inset: 0; opacity: .42; background-image: linear-gradient(var(--navy-line) 1px, transparent 1px), linear-gradient(90deg, var(--navy-line) 1px, transparent 1px); background-size: 54px 54px; }
-    .radar::after { content: ""; position: absolute; width: 42%; height: 140%; top: -20%; left: 42%; transform-origin: 50% 50%; background: linear-gradient(90deg, transparent, rgba(73, 147, 255, .22)); clip-path: polygon(0 50%, 100% 0, 100% 100%); animation: sweep 4.8s linear infinite; }
-    .deal-ping { position: absolute; z-index: 2; display: grid; place-items: center; width: 14px; height: 14px; border: 2px solid #8abbff; border-radius: 50%; background: #0b2a55; }
-    .deal-ping::after { content: ""; position: absolute; inset: -9px; border: 1px solid #6aa6ff; border-radius: 50%; animation: ping 2s ease-out infinite; }
-    .p1 { top: 25%; right: 25%; }
-    .p2 { top: 63%; right: 56%; animation-delay: .7s; }
-    .p3 { top: 40%; right: 75%; animation-delay: 1.4s; }
-    .console-stat { position: absolute; z-index: 3; min-width: 155px; padding: 16px 18px; border: 1px solid #405a7c; background: rgba(7, 22, 45, .92); }
-    .console-stat small { display: block; color: #9cabc0; font-size: .69rem; }
-    .console-stat strong { display: block; margin-top: 4px; font-size: 1.55rem; }
-    .s1 { top: 28px; right: 24px; }
-    .s2 { bottom: 26px; left: 24px; }
-    .trend { display: flex; align-items: flex-end; gap: 4px; height: 26px; margin-top: 8px; direction: ltr; }
-    .trend i { width: 8px; height: var(--h); background: #69a6ff; }
-    .console-bottom { min-height: 84px; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 18px 22px; }
-    .latest { min-width: 0; }
-    .latest small { display: block; color: var(--muted); font-size: .72rem; }
-    .latest strong { display: block; margin-top: 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .latest-badge { flex: none; padding: 8px 11px; background: var(--gold-soft); color: var(--gold); border-radius: 999px; font-size: .72rem; font-weight: 800; }
-    .console-ticket { position: absolute; right: -22px; bottom: 94px; z-index: 5; width: 106px; height: 106px; display: grid; place-items: center; border: 2px solid var(--accent); border-radius: 50%; background: var(--paper); color: var(--accent); transform: rotate(8deg); text-align: center; line-height: 1.45; font-size: .72rem; font-weight: 900; }
-
-    .numbers { width: min(calc(100% - 48px), var(--max)); margin: 0 auto; display: grid; grid-template-columns: 1.15fr .85fr 1fr; border-bottom: 1px solid var(--line-strong); }
-    .number { min-height: 184px; padding: 32px clamp(20px, 3vw, 38px); display: flex; flex-direction: column; justify-content: center; }
-    .number + .number { border-right: 1px solid var(--line); }
-    .number strong { font-size: clamp(2.4rem, 4.5vw, 4.8rem); line-height: 1; letter-spacing: -.05em; }
-    .number span { margin-top: 13px; color: var(--muted); font-size: .84rem; }
-
-    .board-section { padding: clamp(106px, 13vw, 174px) 24px; }
-    .section-head { width: min(100%, var(--max)); margin: 0 auto clamp(42px, 6vw, 70px); display: grid; grid-template-columns: 1fr .7fr; gap: 50px; align-items: end; }
-    h2 { margin: 0; font-size: clamp(2.7rem, 5.8vw, 6.2rem); line-height: 1.02; letter-spacing: -.065em; }
-    .section-copy { max-width: 48ch; justify-self: end; color: var(--muted); line-height: 2; }
-    .eyebrow { display: block; margin-bottom: 15px; color: var(--accent); font-size: .8rem; font-weight: 850; }
-    .board-shell { width: min(100%, var(--max)); margin: 0 auto; border: 1px solid var(--line-strong); background: var(--surface); box-shadow: var(--shadow); }
-    .board-toolbar { min-height: 78px; display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 16px 20px; border-bottom: 1px solid var(--line); }
-    .toolbar-title { display: flex; align-items: center; gap: 10px; font-size: .84rem; font-weight: 800; }
-    .toolbar-title i { width: 8px; height: 8px; background: var(--green); border-radius: 50%; box-shadow: 0 0 0 4px var(--green-soft); }
-    .toolbar-title small { color: var(--soft); font-weight: 500; }
-    .filters { display: flex; flex-wrap: wrap; gap: 7px; }
-    .filter { min-height: 39px; padding: 7px 15px; border: 1px solid var(--line); border-radius: 8px; background: transparent; color: var(--muted); cursor: pointer; transition: color 150ms ease-out, background-color 150ms ease-out, border-color 150ms ease-out; }
-    .filter:hover { border-color: var(--accent); color: var(--accent); }
-    .filter[aria-pressed="true"] { background: var(--ink); border-color: var(--ink); color: var(--paper); }
-    .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: var(--line); }
-    .cards.is-filtered { display: block; padding: 28px; background: var(--paper-2); }
-    .cards.is-filtered .opportunity:not([hidden]) { display: block; width: min(100%, 490px); margin: 0 auto; box-shadow: var(--shadow); }
-    .opportunity {
-      position: relative;
-      min-width: 0;
-      padding: clamp(24px, 3vw, 34px);
-      border: 0;
-      background: var(--surface);
-      color: var(--ink);
-      text-align: right;
-      cursor: pointer;
-      transition: transform 220ms ease-out, box-shadow 220ms ease-out, background-color 150ms ease-out;
-    }
-    .opportunity:hover { z-index: 2; transform: translateY(-8px); background: var(--surface-raised); box-shadow: var(--shadow-hover); }
-    .opportunity[hidden] { display: none; }
-    .card-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
-    .category-icon { width: 54px; height: 54px; display: grid; place-items: center; color: var(--accent); border: 1px solid var(--line); background: var(--paper); }
-    .category-icon svg { width: 27px; height: 27px; }
-    .gold-badge, .deal-badge { padding: 7px 10px; border-radius: 999px; font-size: .68rem; font-weight: 850; white-space: nowrap; }
-    .gold-badge { color: var(--gold); background: var(--gold-soft); }
-    .deal-badge { color: var(--green); background: var(--green-soft); }
-    .opportunity h3 { margin: 29px 0 0; font-size: clamp(1.15rem, 1.6vw, 1.42rem); line-height: 1.6; }
-    .location { display: block; margin-top: 6px; color: var(--soft); font-size: .78rem; }
-    .price { margin-top: 27px; padding-top: 23px; border-top: 1px solid var(--line); }
-    .price small { display: block; color: var(--muted); font-size: .72rem; }
-    .price strong { display: block; margin-top: 3px; font-size: clamp(1.55rem, 2.5vw, 2.25rem); letter-spacing: -.04em; }
-    .fair-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-top: 20px; color: var(--muted); font-size: .74rem; }
-    .fair-row strong { color: var(--green); font-size: .86rem; }
-    .compare { position: relative; height: 8px; margin-top: 10px; background: var(--paper-2); overflow: hidden; }
-    .compare i { display: block; width: var(--deal); height: 100%; background: var(--accent); transition: width 500ms cubic-bezier(.22, 1, .36, 1); }
-    .compare::after { content: ""; position: absolute; left: 7px; top: -3px; bottom: -3px; width: 2px; background: var(--ink); }
-    .fair-value { margin-top: 9px; display: flex; justify-content: space-between; color: var(--soft); font-size: .68rem; }
-    .card-more { margin-top: 25px; display: flex; align-items: center; justify-content: space-between; color: var(--accent); font-size: .76rem; font-weight: 800; }
-    .card-more svg { width: 18px; height: 18px; transition: transform 180ms ease-out; }
-    .opportunity:hover .card-more svg { transform: translateX(-4px); }
-    .opportunity.is-open .card-more svg { transform: rotate(-90deg); }
-    .card-analysis { max-height: 0; overflow: hidden; opacity: 0; border-top: 0 solid var(--line); transition: max-height 320ms cubic-bezier(.22, 1, .36, 1), opacity 180ms ease-out, margin-top 320ms ease-out, padding-top 320ms ease-out, border-width 320ms ease-out; }
-    .opportunity.is-open .card-analysis { max-height: 150px; margin-top: 22px; padding-top: 18px; border-top-width: 1px; opacity: 1; }
-    .analysis-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
-    .analysis-grid span { display: block; color: var(--soft); font-size: .65rem; }
-    .analysis-grid strong { display: block; margin-top: 4px; color: var(--ink); font-size: .79rem; }
-    .sample-note { min-height: 52px; display: flex; align-items: center; gap: 9px; padding: 0 20px; border-top: 1px solid var(--line); color: var(--soft); font-size: .72rem; }
-    .sample-note svg { width: 16px; height: 16px; color: var(--accent); }
-
-    .anatomy { overflow: hidden; background: var(--navy); color: var(--white); }
-    .anatomy-inner { width: min(calc(100% - 48px), var(--max)); margin: 0 auto; padding: clamp(92px, 12vw, 148px) 0; display: grid; grid-template-columns: .86fr 1.14fr; gap: clamp(60px, 9vw, 130px); align-items: center; }
-    .anatomy h2 { max-width: 9ch; }
-    .anatomy-copy p { max-width: 47ch; margin: 26px 0 0; color: #b9c6da; line-height: 2; }
-    .stack { position: relative; min-height: 460px; }
-    .layer { position: absolute; right: 0; width: 100%; min-height: 112px; padding: 25px 28px; border: 1px solid var(--navy-line); background: var(--navy-2); box-shadow: 0 20px 50px rgba(0, 0, 0, .18); transition: transform 250ms ease-out, border-color 250ms ease-out; }
-    .layer:hover { border-color: #6ea9ff; transform: translateX(-10px); }
-    .layer:nth-child(1) { top: 0; right: 0; z-index: 3; }
-    .layer:nth-child(2) { top: 125px; right: 7%; z-index: 2; }
-    .layer:nth-child(3) { top: 250px; right: 14%; z-index: 1; }
-    .layer-num { color: #70a8ff; font-size: .76rem; font-weight: 850; }
-    .layer strong { display: block; margin-top: 7px; font-size: 1.12rem; }
-    .layer span { display: block; margin-top: 6px; color: #9fb0c8; font-size: .76rem; }
-
-    .method { width: min(calc(100% - 48px), var(--max)); margin: 0 auto; padding: clamp(108px, 14vw, 174px) 0; display: grid; grid-template-columns: .74fr 1.26fr; gap: clamp(58px, 10vw, 145px); align-items: start; }
-    .method-intro { position: sticky; top: 38px; }
-    .method-intro h2 { max-width: 8.8ch; }
-    .method-intro p { max-width: 43ch; margin: 24px 0 0; color: var(--muted); line-height: 2; }
-    .steps { counter-reset: steps; border-top: 1px solid var(--line-strong); }
-    .step { counter-increment: steps; display: grid; grid-template-columns: 64px 1fr; gap: 20px; padding: 34px 0; border-bottom: 1px solid var(--line); }
-    .step::before { content: "0" counter(steps); color: var(--accent); font-weight: 850; padding-top: 4px; }
-    .step h3 { margin: 0; font-size: clamp(1.2rem, 2vw, 1.62rem); }
-    .step p { max-width: 56ch; margin: 10px 0 0; color: var(--muted); line-height: 1.95; }
-
-    .closing { border-top: 1px solid var(--line); }
-    .closing-inner { width: min(calc(100% - 48px), var(--max)); margin: 0 auto; padding: clamp(92px, 13vw, 154px) 0; display: grid; grid-template-columns: 1fr auto; gap: 60px; align-items: end; }
-    .closing h2 { max-width: 12ch; }
-    .closing p { max-width: 50ch; margin: 22px 0 0; color: var(--muted); line-height: 2; }
-    .closing-mark { width: clamp(116px, 14vw, 172px); aspect-ratio: 1; position: relative; border: 1px solid var(--line-strong); border-radius: 50%; }
-    .closing-mark::before { content: ""; position: absolute; inset: 25%; border: 6px solid var(--accent); border-radius: 50%; }
-    .closing-mark::after { content: ""; position: absolute; width: 42%; height: 8px; left: 4%; bottom: 16%; background: var(--accent); transform: rotate(-45deg); transform-origin: center; }
-
-    @keyframes breathe { 0%,100% { box-shadow: 0 0 0 4px var(--green-soft); } 50% { box-shadow: 0 0 0 8px var(--green-soft); } }
-    @keyframes sweep { to { transform: rotate(360deg); } }
-    @keyframes ping { from { opacity: 1; transform: scale(.65); } to { opacity: 0; transform: scale(1.55); } }
-    @keyframes enter { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
-    .hero-copy { animation: enter 420ms ease-out both; }
-    .hero-console { animation: enter 480ms ease-out 90ms both; }
-
-    @media (max-width: 980px) {
-      .hero { min-height: auto; }
-      .hero-inner { grid-template-columns: 1fr; }
-      .hero-copy { max-width: 780px; }
-      .hero-console { width: min(100%, 680px); }
-      .section-head { grid-template-columns: 1fr; }
-      .section-copy { justify-self: start; }
-      .cards { grid-template-columns: 1fr 1fr; }
-      .opportunity:last-child { grid-column: 1 / -1; }
-      .anatomy-inner { grid-template-columns: 1fr; }
-      .stack { width: min(100%, 700px); }
-      .method { grid-template-columns: 1fr; }
-      .method-intro { position: static; }
-    }
-    @media (max-width: 680px) {
-      .hero { padding-inline: 20px; padding-top: 42px; }
-      h1 { font-size: clamp(4rem, 21vw, 6.6rem); }
-      h1 .outline { -webkit-text-stroke-width: 1.5px; }
-      .hero-actions { flex-direction: column; }
-      .primary, .secondary { width: 100%; }
-      .hero-console { padding: 14px 0 0 12px; }
-      .radar { height: 285px; }
-      .console-stat { min-width: 136px; padding: 13px; }
-      .console-ticket { width: 78px; height: 78px; right: -8px; bottom: 82px; font-size: .61rem; }
-      .console-bottom { align-items: flex-start; min-height: 106px; }
-      .latest strong { white-space: normal; line-height: 1.65; }
-      .numbers { width: calc(100% - 40px); grid-template-columns: 1fr; }
-      .number { min-height: 130px; padding: 25px 0; }
-      .number + .number { border-right: 0; border-top: 1px solid var(--line); }
-      .board-section { padding-inline: 20px; }
-      .board-toolbar { align-items: flex-start; flex-direction: column; padding: 18px; }
-      .cards { grid-template-columns: 1fr; }
-      .cards.is-filtered { padding: 14px; }
-      .opportunity:last-child { grid-column: auto; }
-      .opportunity:hover { transform: none; }
-      .anatomy-inner, .method, .closing-inner { width: calc(100% - 40px); }
-      .stack { min-height: 445px; }
-      .layer { width: 96%; padding: 22px; }
-      .layer:nth-child(2) { right: 4%; }
-      .layer:nth-child(3) { right: 8%; }
-      .step { grid-template-columns: 42px 1fr; gap: 12px; }
-      .closing-inner { grid-template-columns: 1fr; }
-      .closing-mark { display: none; }
-    }
-    @media (prefers-reduced-motion: reduce) {
-      html { scroll-behavior: auto; }
-      *, *::before, *::after { animation-duration: .01ms !important; animation-delay: 0ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
-    }
-  
-    /* --- live-site additions (v3 port) --- */
-    a.opportunity { text-decoration: none; display: block; }
-    a.opportunity:hover { transform: translateY(-4px); }
-    .topbar {
-      position: sticky; top: 0; z-index: 50;
-      display: flex; align-items: center; gap: 14px;
-      padding: 12px max(24px, env(safe-area-inset-right)) 12px max(24px, env(safe-area-inset-left));
-      background: color-mix(in srgb, var(--paper) 88%, transparent);
-      backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
-      border-bottom: 1px solid var(--line);
-    }
-    .brand { font-weight: 900; font-size: 1.15rem; color: var(--ink); text-decoration: none; }
-    .brand small { display: block; font-size: .68rem; font-weight: 600; color: var(--soft); }
-    .nav { overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
-    .nav::-webkit-scrollbar { display: none; }
-    .nav-row { display: flex; gap: 8px; width: max-content; padding: 2px; }
-    .chip {
-      display: inline-flex; align-items: center; min-height: 44px;
-      padding: 0 16px; border: 1px solid var(--line); border-radius: 999px;
-      background: var(--surface); color: var(--muted); font-size: .82rem; font-weight: 700;
-      text-decoration: none; white-space: nowrap;
-    }
-    .chip.on { background: var(--ink); border-color: var(--ink); color: var(--paper); }
-    .promo {
-      width: min(100%, var(--max)); margin: clamp(48px, 6vw, 80px) auto 0;
-      padding: 0 max(24px, env(safe-area-inset-right)) 0 max(24px, env(safe-area-inset-left));
-    }
-    .promo-box {
-      display: flex; align-items: center; justify-content: space-between; gap: 18px; flex-wrap: wrap;
-      padding: clamp(22px, 3vw, 34px) clamp(24px, 4vw, 44px);
-      border: 1px solid var(--navy-line); border-radius: 22px;
-      background: linear-gradient(135deg, var(--navy), var(--navy-2));
-      color: var(--white); box-shadow: var(--shadow);
-    }
-    .promo-box strong { font-size: 1.15rem; font-weight: 800; }
-    .promo-box p { margin: 6px 0 0; color: color-mix(in srgb, var(--white) 72%, transparent); font-size: .92rem; }
-    .promo-box a {
-      min-height: 48px; display: inline-flex; align-items: center; padding: 0 26px;
-      border-radius: 999px; background: var(--white); color: var(--navy);
-      font-weight: 800; text-decoration: none; font-size: .92rem;
-    }
-    .updated { font-size: .8rem; color: var(--soft); }
-    .foot {
-      width: min(100%, var(--max)); margin: clamp(56px, 7vw, 90px) auto 0;
-      padding: 28px max(24px, env(safe-area-inset-right)) 44px max(24px, env(safe-area-inset-left));
-      border-top: 1px solid var(--line); color: var(--soft); font-size: .82rem;
-      display: flex; flex-wrap: wrap; gap: 10px 28px; align-items: center; justify-content: space-between;
-    }
-    .intro { color: var(--muted); font-size: .95rem; max-width: 62ch; }
-    .empty {
-      padding: 60px 20px; text-align: center; color: var(--soft);
-      border: 1px dashed var(--line-strong); border-radius: 18px; background: var(--surface);
-    }
-    .page-head { width: min(100%, var(--max)); margin: 0 auto; padding: clamp(36px, 5vw, 60px) max(24px, env(safe-area-inset-right)) 8px max(24px, env(safe-area-inset-left)); }
-    .page-head h1 { margin: 0 0 10px; font-size: clamp(1.8rem, 4vw, 2.6rem); font-weight: 900; letter-spacing: -.02em; }
-    .page-head .eyebrow { margin-bottom: 12px; display: inline-block; }
-    @media (max-width: 760px) { .cards { grid-template-columns: 1fr; } }
-"""
 
 
 SITE_URL = os.environ.get("SITE_URL", "https://shekarforsat.github.io/shekar-forsat").rstrip("/")
@@ -580,9 +165,183 @@ DISCLAIMER = ("درصدهای «زیر قیمت» برآورد ما از قیم�
               "با واقعیت بازار اختلاف داشته باشند؛ قبل از هر تصمیمی، خودتان آگهی و محله را بررسی کنید.")
 
 
-def nav_html(cities, cats, prefix="", active_city=None, active_cat=None):
-    home = f'<a class="chip%s" href="%sindex.html">همه</a>' % (
-        "" if (active_city or active_cat) else " on", prefix)
+STYLE = """
+    :root{
+      color-scheme:light dark;
+      --paper:#f6f4e9;--ink:#082f33;--muted:#52696a;--accent:#d9f24b;--line:#103f42;
+      --soft:#e7e8db;--card:#fbfaf2;--quiet:#d7ddd4;--danger:#8f3c31;
+      --max:1180px;
+    }
+    @media(prefers-color-scheme:dark){:root{--paper:#0a2426;--ink:#edf1df;--muted:#b3c1b9;--accent:#d7ef48;--line:#d5dfd3;--soft:#173437;--card:#102d30;--quiet:#385052;--danger:#ff9f8d}}
+    html[data-theme="light"]{--paper:#f6f4e9;--ink:#082f33;--muted:#52696a;--accent:#d9f24b;--line:#103f42;--soft:#e7e8db;--card:#fbfaf2;--quiet:#d7ddd4;--danger:#8f3c31;color-scheme:light}
+    html[data-theme="dark"]{--paper:#0a2426;--ink:#edf1df;--muted:#b3c1b9;--accent:#d7ef48;--line:#d5dfd3;--soft:#173437;--card:#102d30;--quiet:#385052;--danger:#ff9f8d;color-scheme:dark}
+    *{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:var(--paper);color:var(--ink);font-family:"Vazirmatn",Tahoma,sans-serif;line-height:1.7;overflow-x:hidden}body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:20;opacity:.055;background-image:repeating-radial-gradient(circle at 17% 31%,var(--ink) 0 .45px,transparent .7px 4px),repeating-radial-gradient(circle at 73% 68%,var(--ink) 0 .35px,transparent .65px 5px);background-size:7px 9px,11px 13px;mix-blend-mode:multiply}
+    @media(prefers-color-scheme:dark){body::before{opacity:.035;mix-blend-mode:screen}}
+    button,a{font:inherit}a{color:inherit}.wrap{width:min(var(--max),calc(100% - 36px));margin:auto}
+    .mast{border-bottom:3px solid var(--line);padding:12px 0 10px}.mast-inner{display:flex;align-items:center;justify-content:space-between;gap:24px}.brand{font-weight:900;font-size:27px;letter-spacing:-1.5px;line-height:1.18;position:relative;padding-inline:2px;text-decoration:none}.brand::after{content:"";position:absolute;right:-3px;left:-3px;bottom:-2px;height:8px;background:var(--accent);z-index:-1;transform:rotate(-1deg)}
+    .nav{display:flex;gap:24px;align-items:center;font-size:14px;font-weight:700}.nav a{text-decoration:none}.nav a:hover,.nav a:focus-visible{text-decoration:underline;text-underline-offset:5px}.mast-tools{display:flex;align-items:center;gap:10px}.live-badge{font-size:12px;border:1px solid var(--line);padding:4px 10px;border-radius:999px;white-space:nowrap;display:inline-flex;align-items:center;gap:6px;font-weight:800}.live-badge i{width:7px;height:7px;border-radius:50%;background:var(--accent);border:1px solid var(--ink);animation:pulse 2.2s infinite}.icon-button{border:1px solid var(--line);background:transparent;color:var(--ink);border-radius:999px;padding:6px 11px;cursor:pointer;font-weight:800;white-space:nowrap}.icon-button:hover,.icon-button:focus-visible{background:var(--accent);color:#082f33}.edition{border-bottom:1px solid var(--line);font-size:11px;font-weight:700;padding:7px 0}.edition .wrap{display:flex;justify-content:space-between;gap:16px;align-items:center}.edition-label{color:var(--muted)}
+    .ticker-shell{overflow:hidden;background:var(--accent);color:#082f33;border-bottom:2px solid var(--line)}.ticker-track{display:flex;align-items:center;width:max-content;white-space:nowrap;animation:tickerMove 28s linear infinite}.ticker-run{display:flex;gap:18px;align-items:center;padding:9px 9px 8px;font-size:12px;font-weight:650}.ticker-run b{font-weight:900}.ticker-shell .dot{width:5px;height:5px;border-radius:50%;background:#082f33;flex:0 0 auto}@keyframes tickerMove{from{transform:translateX(0)}to{transform:translateX(50%)}}
+    .hero{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(260px,.55fr);gap:62px;padding:70px 0 58px;align-items:end}.kicker{font-size:12px;font-weight:800;margin:0 0 12px}.hero h1{font-size:clamp(40px,6.7vw,82px);line-height:1.08;letter-spacing:-3.6px;margin:0;max-width:930px;font-weight:900}.mark{position:relative;display:inline-block;z-index:0}.mark::after{content:"";position:absolute;right:-4px;left:-4px;height:.31em;bottom:.09em;background:var(--accent);z-index:-1;transform:rotate(-1deg)}.outline-number{display:inline-block;color:var(--paper);-webkit-text-stroke:1.45px var(--ink);paint-order:stroke fill;text-shadow:2px 2px 0 color-mix(in srgb,var(--accent) 76%,transparent);font-variant-numeric:tabular-nums}.hero-aside .outline-number{font-size:56px;line-height:1;font-weight:900;-webkit-text-stroke:1.2px var(--ink)}
+    .lede{font-size:18px;max-width:680px;margin:26px 0 29px;color:var(--muted)}.actions{display:flex;align-items:center;gap:20px;flex-wrap:wrap}.primary{display:inline-flex;align-items:center;gap:13px;border:0;background:var(--ink);color:var(--paper);border-radius:999px;padding:13px 22px;text-decoration:none;font-weight:800;cursor:pointer}.primary:hover{filter:contrast(1.08)}.text-link{text-underline-offset:5px;font-weight:700}.hero-aside{border-top:3px solid var(--line);padding-top:16px}.hero-aside p{margin:8px 0 0;color:var(--muted);font-size:14px}.pulse{width:10px;height:10px;display:inline-block;border-radius:50%;background:var(--accent);border:1px solid var(--ink);margin-left:6px;animation:pulse 2.2s infinite}@keyframes pulse{50%{box-shadow:0 0 0 7px color-mix(in srgb,var(--accent) 20%,transparent)}}@media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}.pulse,.ticker-track,.card,.feature-progress span{animation:none!important}.cards.is-staggering .card{opacity:1!important;transform:none!important}}
+    .section{border-top:3px solid var(--line);padding:24px 0 68px}.section-head{display:flex;align-items:end;justify-content:space-between;gap:24px;margin-bottom:28px}.section h2{font-size:clamp(28px,4vw,46px);line-height:1.25;margin:0;letter-spacing:-1.4px}.section-note{max-width:460px;margin:0;color:var(--muted);font-size:14px}.feature{display:grid;grid-template-columns:.8fr 1.2fr;border:7px double var(--accent);outline:1px solid var(--line);background:var(--card);border-radius:18px;overflow:hidden;margin:4px;box-shadow:8px 8px 0 var(--soft)}.visual{min-height:360px;position:relative;overflow:hidden;background:var(--soft);border-left:1px solid var(--line);display:grid;place-items:center}.visual svg{width:76%;height:auto}.visual .stamp{position:absolute;top:24px;left:24px;border:2px solid var(--ink);border-radius:50%;width:100px;height:100px;display:grid;place-items:center;text-align:center;font-weight:900;transform:rotate(-8deg);background:var(--accent);line-height:1.25}.feature-copy{padding:clamp(24px,5vw,58px)}.meta{display:flex;gap:10px;flex-wrap:wrap;font-size:13px;font-weight:700}.meta span{border-left:1px solid var(--quiet);padding-left:10px}.meta span:last-child{border:0}.feature h3{font-size:clamp(30px,4.5vw,56px);line-height:1.12;margin:18px 0 12px;letter-spacing:-2px}.price{font-size:24px;font-weight:900;margin-bottom:25px}.meter{margin:20px 0}.meter-labels{display:flex;justify-content:space-between;font-size:12px;font-weight:700;margin-bottom:7px}.meter-track{height:14px;border:1px solid var(--ink);position:relative;background:var(--quiet)}.meter-fill{height:100%;background:var(--accent);border-left:1px solid var(--ink)}.deal-bar{margin:14px 0 4px}.deal-bar-head{display:flex;justify-content:space-between;gap:12px;font-size:11px;font-weight:800}.deal-bar-track{height:6px;background:var(--quiet);margin-top:6px;overflow:hidden}.deal-bar-fill{height:100%;background:var(--accent);border-left:1px solid var(--ink)}.confidence{font-size:13px;border-top:1px solid var(--quiet);padding-top:15px;margin-top:20px}.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}.card{border:1px solid var(--line);border-radius:15px;background:var(--card);padding:22px;display:flex;flex-direction:column;min-width:0;position:relative}.card-main{display:flex;flex-direction:column;flex:1;text-decoration:none;color:inherit;min-width:0}.bookmark{position:absolute;top:18px;left:18px;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:999px;width:39px;height:39px;display:grid;place-items:center;cursor:pointer;font-size:19px;font-weight:900;z-index:2}.bookmark[aria-pressed="true"]{background:var(--accent);color:#082f33}.cards.is-staggering .card{opacity:0;animation:cardIn .48s cubic-bezier(.22,.8,.3,1) forwards;animation-delay:var(--delay,0ms)}@keyframes cardIn{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:translateY(0)}}.card-icon{height:142px;background:var(--soft);border-radius:8px;margin:-10px -10px 18px;display:grid;place-items:center}.card-icon svg{width:92px;height:92px}.card h3{font-size:25px;line-height:1.3;margin:12px 0 6px}.deal-title{font-size:16px;font-weight:800;margin:0 0 12px;line-height:1.6}.card .price{font-size:18px;margin:0 0 15px}.card .text-link{margin-top:auto;padding-top:16px}.discovery-tools{display:grid;grid-template-columns:minmax(230px,1fr) auto;gap:16px;align-items:end;margin:0 0 22px}.search-label{display:grid;gap:6px;font-size:12px;font-weight:800}.search{width:100%;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:0;padding:12px 14px;outline:none}.search:focus{box-shadow:inset 0 -4px 0 var(--accent)}.filter-bar{display:flex;align-items:center;justify-content:space-between;gap:16px}.tabs{display:flex;gap:8px;flex-wrap:wrap}.tab{border:1px solid var(--line);color:var(--ink);background:transparent;border-radius:999px;padding:7px 16px;cursor:pointer;font-weight:700;transition:background .18s,color .18s,box-shadow .18s}.tab:hover{box-shadow:inset 0 -3px 0 var(--accent)}.tab[aria-pressed="true"]{background:var(--ink);color:var(--paper);box-shadow:inset 0 -4px 0 var(--accent)}.filter-status{font-size:12px;color:var(--muted);white-space:nowrap}.feature-nav{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-top:17px}.feature-dots{display:flex;gap:8px}.feature-dot{width:12px;height:12px;border:1px solid var(--line);background:transparent;border-radius:50%;padding:0;cursor:pointer}.feature-dot[aria-pressed="true"]{background:var(--accent);box-shadow:inset 0 0 0 2px var(--card)}.feature-progress{height:2px;background:var(--quiet);flex:1;overflow:hidden}.feature-progress span{display:block;height:100%;background:var(--ink);transform-origin:right;animation:featureProgress 7s linear}@keyframes featureProgress{from{transform:scaleX(0)}to{transform:scaleX(1)}}
+    .method{display:grid;grid-template-columns:repeat(3,1fr);border-top:1px solid var(--line);border-right:1px solid var(--line)}.step{padding:28px;border-left:1px solid var(--line);border-bottom:1px solid var(--line);min-height:220px}.num{font-weight:900;font-size:15px;background:var(--accent);border-radius:50%;width:34px;height:34px;display:grid;place-items:center;margin-bottom:35px;color:#082f33}.step h3{font-size:20px;margin:0 0 8px}.step p{margin:0;color:var(--muted);font-size:14px}
+    .faq{max-width:900px}.faq details{border-top:1px solid var(--line);padding:0}.faq details:last-child{border-bottom:1px solid var(--line)}.faq summary{list-style:none;cursor:pointer;padding:19px 0;font-size:18px;font-weight:800;display:flex;justify-content:space-between;gap:20px}.faq summary::-webkit-details-marker{display:none}.faq summary::after{content:"＋"}.faq details[open] summary::after{content:"−"}.faq p{margin:0 0 22px;color:var(--muted);max-width:760px}.drawer-backdrop{position:fixed;inset:0;background:rgba(4,25,27,.48);z-index:40;opacity:0;visibility:hidden;pointer-events:none;transition:opacity .2s,visibility 0s linear .2s}.drawer-backdrop.is-open{opacity:1;visibility:visible;pointer-events:auto;transition-delay:0s}.drawer{position:absolute;left:0;top:0;bottom:0;width:min(420px,92vw);background:var(--paper);color:var(--ink);border-right:3px solid var(--line);padding:22px;transform:translateX(-100%);transition:transform .24s;overflow:auto}.drawer-backdrop.is-open .drawer{transform:translateX(0)}.drawer-head{display:flex;justify-content:space-between;align-items:center;gap:15px;border-bottom:3px solid var(--line);padding-bottom:14px}.drawer h2{font-size:27px;margin:0}.drawer-list{display:grid;gap:12px;margin-top:18px}.saved-item{border-bottom:1px solid var(--line);padding:0 0 14px}.saved-item h3{font-size:17px;margin:0 0 3px}.saved-item p{font-size:12px;color:var(--muted);margin:0}.empty{color:var(--muted);font-size:14px}.session-note{font-size:11px;color:var(--muted);margin-top:20px}
+    footer{border-top:3px solid var(--line);padding:28px 0 42px}.foot{display:grid;grid-template-columns:1fr 2fr;gap:40px}.foot strong{font-size:26px}.fine{font-size:12px;color:var(--muted);margin:0}
+    .promo{width:min(var(--max),calc(100% - 36px));margin:0 auto 68px}.promo-box{display:flex;align-items:center;justify-content:space-between;gap:18px;flex-wrap:wrap;padding:clamp(22px,3vw,34px) clamp(24px,4vw,44px);border:1px solid var(--line);border-radius:18px;background:var(--ink);color:var(--paper);box-shadow:8px 8px 0 var(--soft)}.promo-box strong{font-size:20px;font-weight:900}.promo-box strong .mark::after{height:.3em}.promo-box p{margin:6px 0 0;color:var(--muted);font-size:14px}.promo-box a{min-height:48px;display:inline-flex;align-items:center;padding:0 26px;border-radius:999px;background:var(--accent);color:#082f33;font-weight:900;text-decoration:none;font-size:15px}
+    .chips{display:flex;gap:8px;flex-wrap:wrap;padding:14px 0}.chip{border:1px solid var(--line);color:var(--ink);background:transparent;border-radius:999px;padding:7px 16px;cursor:pointer;font-weight:700;text-decoration:none;font-size:13px}.chip:hover{box-shadow:inset 0 -3px 0 var(--accent)}.chip.on{background:var(--ink);color:var(--paper);box-shadow:inset 0 -4px 0 var(--accent)}.page-head{padding:38px 0 8px}.page-head h1{font-size:clamp(30px,4.5vw,52px);letter-spacing:-2px;margin:0 0 10px;font-weight:900}.page-head .intro{color:var(--muted);max-width:62ch}
+    .empty-box{padding:60px 20px;text-align:center;color:var(--muted);border:1px dashed var(--line);border-radius:18px;background:var(--card)}
+    @media(max-width:820px){.nav{display:none}.hero{grid-template-columns:1fr;gap:30px;padding:46px 0}.hero h1{letter-spacing:-2px}.hero-aside{display:grid;grid-template-columns:auto 1fr;align-items:center;gap:15px}.feature{grid-template-columns:1fr}.visual{min-height:260px;border:0;border-bottom:1px solid var(--line)}.cards,.method{grid-template-columns:1fr}.step{min-height:0}.section-head{display:block}.section-note{margin-top:12px}.discovery-tools{grid-template-columns:1fr}.filter-bar{align-items:flex-start;flex-direction:column}.foot{grid-template-columns:1fr}.section{padding-bottom:48px}.edition .wrap{align-items:flex-start;flex-direction:column;gap:1px}}
+    @media(max-width:480px){.wrap{width:min(100% - 24px,var(--max))}.hero h1{font-size:39px}.lede{font-size:16px}.feature{margin:4px 2px;box-shadow:5px 5px 0 var(--soft)}.feature-copy{padding:23px}.visual .stamp{width:78px;height:78px;font-size:13px;top:16px;left:16px}.ticker-run{font-size:11px}.tab{padding:6px 12px}.live-badge{display:none}.brand{font-size:24px}.mast-tools{gap:6px}.icon-button{font-size:11px;padding:6px 9px}.deal-bar-head{font-size:10px}}
+"""
+
+
+# ---------- shared JS: theme + saved list (localStorage) + drawer ----------
+SHARED_JS = """
+(function(){
+  window.faNum = function(n){ return String(n).replace(/\\d/g, function(x){ return '۰۱۲۳۴۵۶۷۸۹'[x]; }); };
+  window.faPrice = function(n){ return faNum(Number(n).toLocaleString('en-US')); };
+  window.dealDiscount = function(d){ return Math.round(d.pct_below_fair * 100); };
+  window.dealConf = function(n){ return n == null ? 'نامشخص' : n >= 50 ? 'بالا' : n >= 15 ? 'خوب' : 'پایه'; };
+  window.dealById = function(id){ var ds = window.PAGE_DEALS || []; for (var i = 0; i < ds.length; i++){ if (ds[i].divar_token === id) return ds[i]; } return null; };
+
+  var SAVED_KEY = 'qap-saved-v1';
+  function loadSaved(){ try { var a = JSON.parse(localStorage.getItem(SAVED_KEY) || '[]'); return new Set(a.filter(function(x){ return typeof x === 'string'; })); } catch(e){ return new Set(); } }
+  window.savedDeals = loadSaved();
+  function persistSaved(){ try { localStorage.setItem(SAVED_KEY, JSON.stringify(Array.from(window.savedDeals))); } catch(e){} }
+  window.toggleSaved = function(id){
+    if (window.savedDeals.has(id)) window.savedDeals.delete(id); else window.savedDeals.add(id);
+    persistSaved(); syncBookmarks(); renderSaved();
+  };
+  window.bookmarkHTML = function(d){
+    var active = window.savedDeals.has(d.divar_token);
+    return '<button class="bookmark" type="button" data-save="' + d.divar_token + '" aria-pressed="' + active + '" aria-label="' + (active ? 'حذف از لیست من' : 'افزودن به لیست من') + '">' + (active ? '✓' : '＋') + '</button>';
+  };
+  function syncBookmarks(){
+    document.querySelectorAll('[data-save]').forEach(function(b){
+      var id = b.getAttribute('data-save'), active = window.savedDeals.has(id);
+      b.setAttribute('aria-pressed', active); b.textContent = active ? '✓' : '＋';
+      b.setAttribute('aria-label', active ? 'حذف از لیست من' : 'افزودن به لیست من');
+    });
+  }
+  document.addEventListener('click', function(e){
+    var b = e.target.closest('[data-save]');
+    if (b) window.toggleSaved(b.getAttribute('data-save'));
+  });
+  function renderSaved(){
+    var list = document.getElementById('savedList'); if (!list) return;
+    var items = Array.from(window.savedDeals).map(window.dealById).filter(Boolean);
+    var cnt = document.getElementById('savedCount'); if (cnt) cnt.textContent = faNum(items.length);
+    list.innerHTML = items.length ? items.map(function(d){
+      return '<article class="saved-item"><h3><a href="' + d.url + '" target="_blank" rel="noopener">' + d.title + '</a></h3><p>' + faNum(dealDiscount(d)) + '٪ زیر قیمت همتا · ' + d.city + ' · ' + d.cat_fa + '</p></article>';
+    }).join('') : '<p class="empty">هنوز فرصتی نشان نکرده‌ای.</p>';
+  }
+  window.renderSaved = renderSaved;
+  var drawer = document.getElementById('savedDrawer'), savedClose = document.getElementById('savedClose');
+  function setDrawer(open){ if (!drawer) return; drawer.hidden = !open; drawer.classList.toggle('is-open', open); document.body.style.overflow = open ? 'hidden' : ''; if (open && savedClose) savedClose.focus(); }
+  var savedToggle = document.getElementById('savedToggle');
+  if (savedToggle) savedToggle.addEventListener('click', function(){ setDrawer(true); });
+  if (savedClose) savedClose.addEventListener('click', function(){ setDrawer(false); });
+  if (drawer) drawer.addEventListener('click', function(e){ if (e.target === drawer) setDrawer(false); });
+  document.addEventListener('keydown', function(e){ if (e.key === 'Escape') setDrawer(false); });
+
+  var themeToggle = document.getElementById('themeToggle');
+  function currentDark(){ var x = document.documentElement.getAttribute('data-theme'); return x ? x === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches; }
+  function syncThemeButton(){ if (!themeToggle) return; var dark = currentDark(); themeToggle.textContent = dark ? 'حالت روز' : 'حالت شب'; themeToggle.setAttribute('aria-pressed', dark); }
+  if (themeToggle) themeToggle.addEventListener('click', function(){ document.documentElement.setAttribute('data-theme', currentDark() ? 'light' : 'dark'); syncThemeButton(); });
+  syncThemeButton();
+
+  var now = new Date();
+  var dateText = new Intl.DateTimeFormat('fa-IR-u-ca-persian', { timeZone: 'Asia/Tehran', weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(now);
+  var ed = document.getElementById('editionDate'); if (ed) ed.textContent = 'دفتر روزانه · ' + dateText;
+  var parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tehran', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(now);
+  var dp = {}; parts.forEach(function(p){ dp[p.type] = p.value; });
+  var dayStart = Date.UTC(Number(dp.year), 0, 1), today = Date.UTC(Number(dp.year), Number(dp.month) - 1, Number(dp.day));
+  var dayNumber = Math.floor((today - dayStart) / 86400000) + 1;
+  var en = document.getElementById('editionNumber'); if (en) en.textContent = 'شمارهٔ روز ' + faNum(dayNumber);
+  renderSaved();
+})();
+"""
+
+
+def meter_html(d):
+    pct = max(0, min(100, round(d["price"] / d["fair_price"] * 100))) if d["fair_price"] else 100
+    return (
+        '<div class="meter" aria-label="قیمت آگهی ' + fa_num(pct) + ' درصد قیمت همتا است">'
+        '<div class="meter-labels"><span>آگهی: ' + fa_num(f"{d['price']:,}") + ' تومان</span>'
+        '<span>همتا: ' + fa_num(f"{d['fair_price']:,}") + ' تومان</span></div>'
+        '<div class="meter-track"><div class="meter-fill" style="width:' + str(pct) + '%"></div></div></div>'
+    )
+
+
+def deal_bar_html(d):
+    pct = round(d["pct_below_fair"] * 100)
+    return (
+        '<div class="deal-bar" aria-label="فاصله از قیمت همتا ' + fa_num(pct) + ' درصد">'
+        '<div class="deal-bar-head"><span>فاصله از همتا</span><strong>' + fa_num(pct) + '٪ زیر بازار</strong></div>'
+        '<div class="deal-bar-track"><div class="deal-bar-fill" style="width:' + str(min(100, pct * 3)) + '%"></div></div></div>'
+    )
+
+
+def card_static_html(d, delay_ms=0):
+    """Server-rendered deal card (city/cat pages) — mirrors the client renderer."""
+    pct = round(d["pct_below_fair"] * 100)
+    icon = ICON_SVG.get(d.get("icon", "home"), ICON_SVG["home"])
+    loc = d["district"] or d["city"]
+    return (
+        '<article class="card" style="--delay:' + str(delay_ms) + 'ms">'
+        + bookmark_static_html(d) +
+        '<a class="card-main" href="' + d["url"] + '" target="_blank" rel="noopener"'
+        ' aria-label="' + d["title"] + '، ' + fa_num(pct) + ' درصد زیر قیمت">'
+        '<div class="card-icon">' + icon + '</div>'
+        '<div class="meta"><span>' + d["cat_fa"] + '</span><span>' + loc + '</span></div>'
+        '<h3><span class="mark">' + fa_num(pct) + '٪</span> زیر قیمت همتا</h3>'
+        '<div class="deal-title">' + d["title"] + '</div>'
+        + meter_html(d) + deal_bar_html(d) +
+        '<div class="confidence">' + fa_num(d["n_comps"]) + ' نمونهٔ همتا · اطمینان ' + _conf(d["n_comps"]) + '</div>'
+        '<span class="text-link">مشاهدهٔ آگهی ←</span>'
+        '</a></article>'
+    )
+
+
+def bookmark_static_html(d):
+    # aria-pressed is synced client-side from localStorage; default unpressed.
+    return ('<button class="bookmark" type="button" data-save="' + d["divar_token"] +
+            '" aria-pressed="false" aria-label="افزودن به لیست من">＋</button>')
+
+
+def masthead_html(prefix="", index_mode=True):
+    if index_mode:
+        nav = ('<nav class="nav" aria-label="ناوبری"><a href="#opportunities">فرصت‌ها</a>'
+               '<a href="#method">روش قاپ</a><a href="#questions">پرسش‌ها</a></nav>')
+        brand_href = prefix + "index.html"
+    else:
+        nav = ('<nav class="nav" aria-label="ناوبری"><a href="' + prefix + 'index.html#opportunities">فرصت‌ها</a>'
+               '<a href="' + prefix + 'index.html#method">روش قاپ</a>'
+               '<a href="' + prefix + 'index.html#questions">پرسش‌ها</a></nav>')
+        brand_href = prefix + "index.html"
+    return (
+        '<header class="mast"><div class="wrap mast-inner">'
+        '<a class="brand" href="' + brand_href + '" aria-label="قاپ">قاپ</a>' + nav +
+        '<div class="mast-tools">'
+        '<span class="live-badge"><i></i>برد زنده</span>'
+        '<button class="icon-button" id="themeToggle" type="button" aria-pressed="false">حالت شب</button>'
+        '<button class="icon-button" id="savedToggle" type="button" aria-haspopup="dialog">لیست من · '
+        '<span id="savedCount">۰</span></button>'
+        '</div></div></header>'
+    )
+
+
+def edition_html(updated_fa):
+    return (
+        '<div class="edition"><div class="wrap"><span id="editionDate">دفتر روزانه</span>'
+        '<span class="edition-label"><span id="editionNumber">شمارهٔ روز</span> · به‌روزرسانی: '
+        + updated_fa + '</span></div></div>'
+    )
+
+
+def chips_html(cities, cats, prefix="", active_city=None, active_cat=None):
+    home = '<a class="chip%s" href="%sindex.html">همه</a>' % (
+        " on" if not (active_city or active_cat) else "", prefix)
     city_chips = "".join(
         '<a class="chip%s" href="%scity/%s.html">%s</a>' % (
             " on" if active_city == c else "", prefix, city_slug(c), c)
@@ -591,14 +350,18 @@ def nav_html(cities, cats, prefix="", active_city=None, active_cat=None):
         '<a class="chip%s" href="%scat/%s.html">%s</a>' % (
             " on" if active_cat == k else "", prefix, CATS[k][0], CATS[k][1])
         for k in cats)
-    return ('<nav class="nav" aria-label="ناوبری"><div class="nav-row">'
-            + home + cat_chips + city_chips + "</div></nav>")
+    return '<div class="wrap"><div class="chips">' + home + cat_chips + city_chips + "</div></div>"
 
 
-FOOT = ('<footer class="foot"><span>قاپ — موتور شکار فرصت‌های زیرقیمت</span>'
-        '<span class="updated" id="updated"></span>'
-        '<span style="flex-basis:100%;font-size:.75rem">DISCLAIMER_TXT</span></footer>').replace(
-            "DISCLAIMER_TXT", DISCLAIMER)
+FOOT_HTML = (
+    '<footer><div class="wrap foot"><strong>فرصت را زودتر ببین.</strong>'
+    '<p class="fine">DISCLAIMER_TXT<br><span id="updated"></span></p></div></footer>'
+    '<div class="drawer-backdrop" id="savedDrawer" role="dialog" hidden aria-modal="true" aria-labelledby="savedTitle">'
+    '<aside class="drawer"><div class="drawer-head"><h2 id="savedTitle">لیست من</h2>'
+    '<button class="icon-button" id="savedClose" type="button">بستن</button></div>'
+    '<div class="drawer-list" id="savedList"></div>'
+    '<p class="session-note">انتخاب‌ها در همین مرورگر ذخیره می‌شوند.</p></aside></div>'
+).replace("DISCLAIMER_TXT", DISCLAIMER)
 
 
 INDEX_HTML = """<!doctype html>
@@ -607,8 +370,8 @@ INDEX_HTML = """<!doctype html>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
 <meta name="color-scheme" content="light dark"/>
-<meta name="theme-color" content="#f1f3f6" media="(prefers-color-scheme: light)"/>
-<meta name="theme-color" content="#080c13" media="(prefers-color-scheme: dark)"/>
+<meta name="theme-color" content="#f6f4e9" media="(prefers-color-scheme: light)"/>
+<meta name="theme-color" content="#0a2426" media="(prefers-color-scheme: dark)"/>
 <link rel="icon" href="data:,"/>
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
@@ -618,140 +381,161 @@ INDEX_HTML = """<!doctype html>
 <style>{STYLE}</style>
 </head>
 <body>
+{MASTHEAD}
+{EDITION}
+<div class="ticker-shell" aria-label="تازه‌ترین فرصت‌ها"><div class="ticker-track" id="tickerTrack"></div></div>
 <main>
-<section class="hero">
-  <div class="hero-inner">
-    <div class="hero-copy">
-      <div class="signal"><i aria-hidden="true"></i>موتور شکار فرصت‌های زیرقیمت</div>
-      <h1>قبل از بازار، <span class="outline">پیدایش کن.</span></h1>
-      <p class="lead">قاپ هزاران آگهی را با نبض واقعی هر محله، مدل و دسته مقایسه می‌کند؛ تا فرصتی را ببینی که بقیه هنوز از کنارش رد می‌شوند.</p>
-      <div class="hero-actions">
-        <a class="primary" href="#live-board">دیدن برد فرصت‌ها
-          <svg class="arrow" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M7 10l5 5 5-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        </a>
-        <a class="secondary" href="#method">منطق قاپ چطور کار می‌کند؟</a>
-      </div>
+  <section class="wrap hero">
+    <div><p class="kicker">صفحهٔ اول / شکار زیرقیمت‌ها</p>
+      <h1><span class="mark"><span class="outline-number" id="heroCountNum">۰</span> فرصت</span> در آگهی‌های امروز؛ هر کدام دست‌کم <span class="mark"><span class="outline-number" id="heroMinNum">۰</span>٪</span> زیر قیمت همتای خودش</h1>
+      <p class="lede">قاپ آگهی را جدا از هیاهوی بازار می‌سنجد: قیمت، ویژگی‌ها و نمونه‌های همتا کنار هم قرار می‌گیرند تا موردی که واقعاً ارزش بررسی دارد، زودتر دیده شود.</p>
+      <div class="actions"><a class="primary" href="#opportunities">فرصت‌ها را نشانم بده <span aria-hidden="true">←</span></a><a class="text-link" href="#method">قاپ چطور حساب می‌کند؟</a></div>
     </div>
-    <div class="hero-console" aria-label="نمایش موتور رصد قاپ">
-      <div class="console">
-        <div class="console-head"><div class="console-title"><i aria-hidden="true"></i>رادار قاپ</div><span>یک دور کامل رصد</span></div>
-        <div class="radar">
-          <div class="radar-grid"></div>
-          <span class="deal-ping p1"></span><span class="deal-ping p2"></span><span class="deal-ping p3"></span>
-          <div class="console-stat s1"><small>شهرهای تحت پوشش</small><strong>۳۱ مرکز</strong><div class="trend"><i style="--h:30%"></i><i style="--h:45%"></i><i style="--h:38%"></i><i style="--h:65%"></i><i style="--h:72%"></i><i style="--h:88%"></i></div></div>
-          <div class="console-stat s2"><small>معیارهای هم‌زمان</small><strong>۱۲۸+</strong><div class="trend"><i style="--h:38%"></i><i style="--h:65%"></i><i style="--h:50%"></i><i style="--h:78%"></i><i style="--h:92%"></i><i style="--h:76%"></i></div></div>
-        </div>
-        <div class="console-bottom"><div class="latest"><small>نمونهٔ تازه‌ترین شکار</small><strong id="latest-hunt">…</strong></div><span class="latest-badge">فرصت طلایی</span></div>
-      </div>
-      <div class="console-ticket" aria-hidden="true">هوش بازار<br/>در یک نگاه</div>
-    </div>
-  </div>
-</section>
+    <aside class="hero-aside"><div><span class="pulse"></span><strong class="outline-number"><span id="cycleCount">۳۰</span>′</strong></div><p>بازار هر سی دقیقه دوباره خوانده و فرصت‌ها از نو رتبه‌بندی می‌شوند.</p></aside>
+  </section>
 
-<section class="numbers" aria-label="پوشش قاپ">
-  <div class="number"><strong>۳۱</strong><span>مرکز استان در نقشه رصد</span></div>
-  <div class="number"><strong>۳۰ دقیقه</strong><span>فاصلهٔ هر دور بررسی</span></div>
-  <div class="number"><strong id="live-count">…</strong><span>آگهی زیرقیمت فعال</span></div>
-</section>
+  <section class="wrap section" id="opportunities"><div class="section-head"><div><p class="kicker">خبر اصلی</p><h2>فرصتی با فاصلهٔ روشن از بازار</h2></div><p class="section-note">پیش از هر تصمیم، اصل آگهی و وضعیت واقعی کالا را بررسی کن؛ قاپ فقط نقطهٔ شروع را نشان می‌دهد.</p></div><article class="feature" id="featureCard" aria-live="polite"></article><div class="feature-nav"><div class="feature-dots" id="featureDots" aria-label="انتخاب فرصت شاخص"></div><div class="feature-progress" aria-hidden="true"><span id="featureProgress"></span></div><button class="icon-button" id="featurePause" type="button" aria-pressed="false">مکث</button></div></section>
 
-{NAV}
+  <section class="wrap section"><div class="section-head"><div><p class="kicker">ویترین</p><h2>فرصت‌های دیگر، بدون شلوغی</h2></div><p class="section-note">هر کارت فقط اطلاعاتی را نشان می‌دهد که برای تصمیم اول لازم است: فاصله از همتا، تعداد مقایسه و درجهٔ اطمینان.</p></div><div class="discovery-tools"><label class="search-label" for="dealSearch">جست‌وجو در فرصت‌ها<input class="search" id="dealSearch" type="search" inputmode="search" placeholder="مثلاً تبریز، دنا یا موبایل" autocomplete="off"></label><div class="filter-bar"><div class="tabs" id="tabs" role="group" aria-label="فیلتر سریع شهر و دسته"></div><span class="filter-status" id="filterStatus" aria-live="polite"></span></div></div><div class="cards" id="cards"></div></section>
 
-<section class="board-section" id="live-board" aria-labelledby="board-title">
-  <div class="section-head">
-    <div><span class="eyebrow">محصول زنده</span><h2 id="board-title">برد زندهٔ فرصت‌ها.</h2></div>
-    <p class="section-copy">قیمت آگهی کنار برآورد منصفانهٔ بازار قرار می‌گیرد؛ نه یک برچسب مبهم، بلکه اختلافی که با چشم می‌بینی.</p>
-  </div>
-  <div class="board-shell">
-    <div class="board-toolbar">
-      <div class="toolbar-title"><i aria-hidden="true"></i>فرصت‌های امروز</div>
-      <div class="filters" aria-label="فیلتر فرصت‌ها">
-        <button class="filter" type="button" data-tier="all" aria-pressed="true">همه</button>
-        <button class="filter" type="button" data-tier="golden" aria-pressed="false">فرصت طلایی</button>
-        <button class="filter" type="button" data-tier="opportunity" aria-pressed="false">فرصت</button>
-      </div>
-    </div>
-    <div class="cards" id="grid" aria-live="polite"></div>
-  </div>
-</section>
+  <section class="wrap section" id="method"><div class="section-head"><div><p class="kicker">روش قاپ</p><h2>از آگهی خام تا فرصت قابل بررسی</h2></div><p class="section-note">قاپ جای بازدید، کارشناسی یا استعلام را نمی‌گیرد؛ فقط مرحلهٔ پیدا کردن گزینه‌های امیدوارکننده را کوتاه می‌کند.</p></div><div class="method"><article class="step"><span class="num">۱</span><h3>خواندن بازار</h3><p>آگهی‌های تازهٔ ۳۱ مرکز استان در بازارهای ملک، خودرو و کالای دیجیتال جمع می‌شوند.</p></article><article class="step"><span class="num">۲</span><h3>پاک‌سازی</h3><p>آگهی‌های تکراری، بی‌قیمت یا دارای مشخصات ناسازگار از مقایسه کنار می‌روند.</p></article><article class="step"><span class="num">۳</span><h3>ساخت همتا</h3><p>هر مورد فقط با نمونه‌هایی سنجیده می‌شود که از نظر ویژگی‌های کلیدی به آن نزدیک‌اند.</p></article><article class="step"><span class="num">۴</span><h3>محاسبهٔ فاصله</h3><p>قیمت آگهی با میانهٔ همتاها مقایسه و درصد فاصله بدون بزرگ‌نمایی محاسبه می‌شود.</p></article><article class="step"><span class="num">۵</span><h3>سنجش اطمینان</h3><p>تعداد همتاها و پراکندگی قیمت‌ها تعیین می‌کند قاپ چقدر به نتیجه مطمئن باشد.</p></article><article class="step"><span class="num">۶</span><h3>پرچم احتیاط</h3><p>قیمت غیرعادی، توضیح مبهم یا تناقض مشخصات به‌جای پنهان شدن، کنار نتیجه می‌آید.</p></article></div></section>
 
-<div class="promo"><div class="promo-box">
-  <div><strong>خبرهای مهم را هم از دست نده</strong><p>کانال تلگرامی خبراتور — گزیدهٔ مهم‌ترین خبرهای ایران و جهان</p></div>
-  <a href="https://t.me/khabarator" target="_blank" rel="noopener">عضویت در خبراتور</a>
-</div></div>
+  <section class="wrap section" id="questions"><div class="section-head"><div><p class="kicker">پرسش‌های پیش از اعتماد</p><h2>شفاف، همان‌قدر که لازم است</h2></div></div><div class="faq"><details open><summary>آیا هر مورد زیرقیمت، معاملهٔ خوبی است؟</summary><p>نه. زیرقیمت بودن فقط نقطهٔ شروع بررسی است. اصالت آگهی، سلامت فنی، سند، بدهی، شرایط انتقال و علت فروش باید جداگانه بررسی شوند.</p></details><details><summary>«اطمینان بالا» یعنی چه؟</summary><p>یعنی برای مقایسه، همتای کافی وجود داشته و قیمت آن‌ها پراکندگی غیرعادی نداشته است؛ نه اینکه خود کالا یا فروشنده تأیید شده باشد.</p></details><details><summary>چرا یک آگهی ممکن است ناپدید شود؟</summary><p>ممکن است حذف یا فروخته شده باشد، قیمتش تغییر کند یا با ورود دادهٔ تازه دیگر زیر آستانهٔ فرصت قرار نگیرد.</p></details><details><summary>آیا قاپ به آگهی‌دهنده وابسته است؟</summary><p>رتبه‌بندی مستقل و بر اساس مقایسهٔ داده‌ها نمایش داده شده است؛ نمایش در فهرست به‌معنای توصیه یا تضمین معامله نیست.</p></details></div></section>
 
-<section class="anatomy" aria-labelledby="anatomy-title">
-  <div class="anatomy-inner">
-    <div class="anatomy-copy"><span class="eyebrow">زیر پوست هر نتیجه</span><h2 id="anatomy-title">یک قیمت. سه لایه فهم.</h2><p>قاپ فقط عددها را مرتب نمی‌کند. زمینهٔ آگهی را می‌فهمد، همتاهای درست را پیدا می‌کند و فاصلهٔ معنادار را از ارزان‌نمایی جدا می‌سازد.</p></div>
-    <div class="stack" aria-label="سه لایه تحلیل قاپ">
-      <div class="layer"><span class="layer-num">۰۱</span><strong>زمینهٔ آگهی</strong><span>محله، مدل، سال، وضعیت و ویژگی‌های اثرگذار</span></div>
-      <div class="layer"><span class="layer-num">۰۲</span><strong>بازار همتا</strong><span>مقایسه فقط با نمونه‌های واقعاً نزدیک و قابل قیاس</span></div>
-      <div class="layer"><span class="layer-num">۰۳</span><strong>امتیاز فرصت</strong><span>فاصلهٔ قیمت، کیفیت آگهی و احتمال ارزش خرید</span></div>
-    </div>
-  </div>
-</section>
-
-<section class="method" id="method" aria-labelledby="method-title">
-  <div class="method-intro"><span class="eyebrow">منطق شکار</span><h2 id="method-title">قیمت پایین، کافی نیست.</h2><p>فرصت واقعی وقتی شکل می‌گیرد که قیمت، مشخصات و بازار همتا یک داستان واحد بگویند.</p></div>
-  <div class="steps">
-    <article class="step"><div><h3>خواندن پیوستهٔ بازار</h3><p>آگهی‌های تازه در شهرهای تحت پوشش، دوره‌ای وارد چرخهٔ مقایسه می‌شوند.</p></div></article>
-    <article class="step"><div><h3>مقایسهٔ درست با درست</h3><p>هر مورد با محله، مدل و نمونه‌های نزدیک به خودش سنجیده می‌شود؛ نه با یک میانگین گمراه‌کننده.</p></div></article>
-    <article class="step"><div><h3>رتبه‌بندی اختلاف معنادار</h3><p>فقط فاصله‌هایی که از فیلتر کیفیت و همسانی عبور کنند، روی برد فرصت‌ها بالا می‌آیند.</p></div></article>
-  </div>
-</section>
-
-<section class="closing">
-  <div class="closing-inner"><div><h2>بازار شلوغ است. دید تو نباید باشد.</h2><p>قاپ هزاران آگهی را به چند تصمیم روشن تبدیل می‌کند؛ با مقایسه‌ای که می‌توانی ببینی، بفهمی و روی آن حساب باز کنی.</p></div><div class="closing-mark" aria-hidden="true"></div></div>
-</section>
+  <div class="promo"><div class="promo-box"><div><strong>خبرهای مهم را هم <span class="mark">از دست نده</span></strong><p>کانال تلگرامی خبراتور — گزیدهٔ مهم‌ترین خبرهای ایران و جهان</p></div><a href="https://t.me/khabarator" target="_blank" rel="noopener">عضویت در خبراتور</a></div></div>
 </main>
 {FOOT}
 <script>
-const ICONS = {ICONS_JS};
-const CATFA = {CATFA_JS};
-const faD = s => String(s).replace(/\\d/g, d => "۰۱۲۳۴۵۶۷۸۹"[d]);
-const faN = n => faD(Number(n).toLocaleString("en-US"));
-const conf = n => n == null ? "نامشخص" : n >= 50 ? "بالا" : n >= 15 ? "خوب" : "پایه";
-function card(d){
-  const pct = Math.round(d.pct_below_fair*100);
-  const w = d.fair_price ? Math.max(4, Math.min(100, Math.round(d.price/d.fair_price*100))) : 100;
-  const golden = d.tier === "golden";
-  const badge = golden ? '<span class="gold-badge">فرصت طلایی</span>' : '<span class="deal-badge">فرصت</span>';
-  const icon = {"home":ICONS.home,"car":ICONS.car,"digital":ICONS.digital}[d.icon||"home"];
-  const loc = d.district || d.city;
-  return '<a class="opportunity" data-tier="'+d.tier+'" href="https://divar.ir/v/'+d.divar_token+'" target="_blank" rel="noopener" aria-label="'+d.title+'، '+faN(pct)+' درصد زیر قیمت">'
-    +'<div class="card-top"><span class="category-icon" aria-hidden="true">'+icon+'</span>'+badge+'</div>'
-    +'<h3>'+d.title+'</h3><span class="location">'+loc+'</span>'
-    +'<div class="price"><small>قیمت آگهی</small><strong>'+faN(d.price)+' تومان</strong></div>'
-    +'<div class="fair-row"><span>فاصله تا قیمت منصفانه</span><strong>'+faN(pct)+'٪ پایین‌تر</strong></div>'
-    +'<div class="compare"><i style="--deal:'+w+'%"></i></div>'
-    +'<div class="fair-value"><span>آگهی: '+faN(d.price)+'</span><span>منصفانه: '+faN(d.fair_price)+'</span></div>'
-    +'<div class="card-analysis"><div class="analysis-grid">'
-    +'<div><span>نمونه‌های همتا</span><strong>'+(d.n_comps==null?"—":faN(d.n_comps))+' آگهی</strong></div>'
-    +'<div><span>اطمینان تحلیل</span><strong>'+conf(d.n_comps)+'</strong></div>'
-    +'<div><span>دسته‌بندی</span><strong>'+(CATFA[d.category]||"")+'</strong></div>'
-    +'</div></div></a>';
-}
-let ALL = [];
-fetch("deals.json").then(r=>r.json()).then(j=>{
-  const ds = j.deals || [];
-  ALL = ds;
-  document.getElementById("grid").innerHTML = ds.slice(0,60).map(card).join("") || '<div class="empty">فعلاً آگهی زیرقیمتی ثبت نشده.</div>';
-  document.getElementById("live-count").textContent = faN(j.count || ds.length);
-  const g = ds.find(d=>d.tier==="golden") || ds[0];
-  if (g) document.getElementById("latest-hunt").textContent = g.title + " · " + faN(Math.round(g.pct_below_fair*100)) + "٪ زیر قیمت";
-  const u = document.getElementById("updated");
-  if (u) u.textContent = "آخرین به‌روزرسانی: " + j.updated_fa;
-});
-document.querySelectorAll(".filter").forEach(b=>b.addEventListener("click",()=>{
-  document.querySelectorAll(".filter").forEach(x=>x.setAttribute("aria-pressed","false"));
-  b.setAttribute("aria-pressed","true");
-  const t = b.dataset.tier;
-  const list = t==="all" ? ALL : ALL.filter(d => d.tier===t);
-  document.getElementById("grid").innerHTML = list.slice(0,60).map(card).join("") || '<div class="empty">موردی در این گروه نیست.</div>';
-}));
+window.PAGE_DEALS = [];
+</script>
+<script>
+{SHARED_JS}
+</script>
+<script>
+(function(){
+  var ICONS = {ICONS_JS};
+  function icon(type){ return '<svg viewBox="0 0 96 96" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round" aria-hidden="true">' + (ICONS[type] || ICONS.home) + '</svg>'; }
+  var reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var cardsEl = document.getElementById('cards'), featureEl = document.getElementById('featureCard');
+  var currentFilter = 'all', currentKind = 'all', query = '', featureIndex = 0, featureTimer = null, featurePaused = reduceMotion;
+
+  function shortTitle(t){ return t.length > 30 ? t.slice(0, 30) + '…' : t; }
+
+  function renderTicker(data){
+    var top = data.slice().sort(function(a, b){ return b.pct_below_fair - a.pct_below_fair; }).slice(0, 6);
+    var items = top.map(function(d){ return '<span>' + d.city + ' · ' + shortTitle(d.title) + ' · ' + faNum(dealDiscount(d)) + '٪ پایین‌تر</span>'; }).join('<i class="dot"></i>');
+    var run = '<div class="ticker-run"><b>فرصت تازه</b><i class="dot"></i>' + items + '<i class="dot"></i><span>رصد ۳۱ مرکز استان · چرخهٔ ۳۰ دقیقه‌ای</span></div>';
+    document.getElementById('tickerTrack').innerHTML = run + run.replace('ticker-run', 'ticker-run" aria-hidden="true');
+  }
+
+  function animateNumber(id, target, duration){
+    var el = document.getElementById(id); if (!el) return;
+    if (reduceMotion){ el.textContent = faNum(target); return; }
+    var start = null;
+    function tick(now){ if (!start) start = now; var p = Math.min((now - start) / duration, 1); var e = 1 - Math.pow(1 - p, 3); el.textContent = faNum(Math.round(target * e)); if (p < 1) requestAnimationFrame(tick); }
+    requestAnimationFrame(tick);
+  }
+
+  function meter(d){
+    var pct = d.fair_price ? Math.max(0, Math.min(100, Math.round(d.price / d.fair_price * 100))) : 100;
+    return '<div class="meter" aria-label="قیمت آگهی ' + faNum(pct) + ' درصد قیمت همتا است"><div class="meter-labels"><span>آگهی: ' + faPrice(d.price) + ' تومان</span><span>همتا: ' + faPrice(d.fair_price) + ' تومان</span></div><div class="meter-track"><div class="meter-fill" style="width:' + pct + '%"></div></div></div>';
+  }
+  function dealBar(d){
+    var pct = dealDiscount(d);
+    return '<div class="deal-bar" aria-label="فاصله از قیمت همتا ' + faNum(pct) + ' درصد"><div class="deal-bar-head"><span>فاصله از همتا</span><strong>' + faNum(pct) + '٪ زیر بازار</strong></div><div class="deal-bar-track"><div class="deal-bar-fill" style="width:' + Math.min(100, pct * 3) + '%"></div></div></div>';
+  }
+  function metaRow(d){ return '<div class="meta"><span>' + d.cat_fa + '</span><span>' + (d.district || d.city) + '</span></div>'; }
+  function confRow(d){ return '<div class="confidence">' + faNum(d.n_comps) + ' نمونهٔ همتا · اطمینان ' + dealConf(d.n_comps) + '</div>'; }
+
+  function renderFeature(){
+    var tops = window.PAGE_DEALS.slice().sort(function(a, b){ return b.pct_below_fair - a.pct_below_fair; }).slice(0, 3);
+    if (!tops.length){ featureEl.innerHTML = '<p class="empty" style="padding:40px">فعلاً آگهی زیرقیمتی ثبت نشده.</p>'; return; }
+    var d = tops[featureIndex % tops.length], disc = dealDiscount(d);
+    var badge = d.tier === 'golden' ? 'فرصت طلایی' : 'فرصت';
+    featureEl.innerHTML = '<div class="visual">' + bookmarkHTML(d) + icon(d.icon) + '<div class="stamp">' + faNum(disc) + '٪<br>پایین‌تر</div></div>'
+      + '<div class="feature-copy"><div class="meta"><span>' + d.cat_fa + '</span><span>' + d.city + '</span><span>' + badge + '</span></div>'
+      + '<h3>' + d.title + '</h3><div class="price">' + faPrice(d.price) + ' تومان</div>'
+      + meter(d) + dealBar(d) + confRow(d)
+      + '<p><a class="primary" href="' + d.url + '" target="_blank" rel="noopener">مشاهدهٔ آگهی ←</a></p></div>';
+    document.getElementById('featureDots').innerHTML = tops.map(function(item, i){
+      return '<button class="feature-dot" type="button" data-feature="' + i + '" aria-label="نمایش فرصت ' + faNum(i + 1) + '" aria-pressed="' + (i === featureIndex % tops.length) + '"></button>';
+    }).join('');
+    restartProgress();
+  }
+  function restartProgress(){ var bar = document.getElementById('featureProgress'); bar.style.animation = 'none'; void bar.offsetWidth; bar.style.animation = featurePaused ? 'none' : ''; }
+  function startFeatureTimer(){ clearInterval(featureTimer); if (!featurePaused){ featureTimer = setInterval(function(){ featureIndex = (featureIndex + 1) % 3; renderFeature(); }, 7000); } }
+  function selectFeature(i){ featureIndex = i; renderFeature(); startFeatureTimer(); }
+  document.getElementById('featureDots').addEventListener('click', function(e){ var b = e.target.closest('[data-feature]'); if (b) selectFeature(Number(b.getAttribute('data-feature'))); });
+  document.getElementById('featurePause').addEventListener('click', function(){ featurePaused = !featurePaused; this.setAttribute('aria-pressed', featurePaused); this.textContent = featurePaused ? 'پخش' : 'مکث'; restartProgress(); startFeatureTimer(); });
+
+  function buildTabs(data){
+    var cities = {}, cats = {};
+    data.forEach(function(d){ cities[d.city] = (cities[d.city] || 0) + 1; cats[d.category] = (cats[d.category] || 0) + 1; });
+    var topCities = Object.keys(cities).sort(function(a, b){ return cities[b] - cities[a]; }).slice(0, 6);
+    var catOrder = ['house_sell', 'house_rent', 'car', 'motorcycle', 'mobile', 'commercial_sell', 'commercial_rent'];
+    var catList = catOrder.filter(function(c){ return cats[c]; });
+    var tabs = '<button class="tab" data-kind="all" data-filter="all" aria-pressed="true">همه</button>'
+      + topCities.map(function(c){ return '<button class="tab" data-kind="city" data-filter="' + c + '" aria-pressed="false">' + c + '</button>'; }).join('')
+      + catList.map(function(c){ var label = (window.CAT_FA_MAP || {})[c] || c; return '<button class="tab" data-kind="category" data-filter="' + c + '" aria-pressed="false">' + label + '</button>'; }).join('');
+    document.getElementById('tabs').innerHTML = tabs;
+    document.querySelectorAll('#tabs .tab').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        document.querySelectorAll('#tabs .tab').forEach(function(b){ b.setAttribute('aria-pressed', 'false'); });
+        btn.setAttribute('aria-pressed', 'true');
+        currentFilter = btn.getAttribute('data-filter'); currentKind = btn.getAttribute('data-kind');
+        renderCards(true);
+      });
+    });
+  }
+
+  function matchingItems(){
+    var needle = query.trim();
+    return window.PAGE_DEALS.filter(function(d){
+      var ok = currentFilter === 'all' || (currentKind === 'city' ? d.city === currentFilter : d.category === currentFilter);
+      var hay = d.title + ' ' + d.city + ' ' + (d.district || '') + ' ' + d.cat_fa;
+      return ok && (!needle || hay.indexOf(needle) > -1);
+    });
+  }
+  function renderCards(animateNow){
+    var items = matchingItems();
+    cardsEl.innerHTML = items.length ? items.map(function(d, i){
+      var pct = dealDiscount(d);
+      return '<article class="card" style="--delay:' + (i * 110) + 'ms">' + bookmarkHTML(d)
+        + '<a class="card-main" href="' + d.url + '" target="_blank" rel="noopener" aria-label="' + d.title + '، ' + faNum(pct) + ' درصد زیر قیمت">'
+        + '<div class="card-icon">' + icon(d.icon) + '</div>' + metaRow(d)
+        + '<h3><span class="mark">' + faNum(pct) + '٪</span> زیر قیمت همتا</h3>'
+        + '<div class="deal-title">' + d.title + '</div>'
+        + meter(d) + dealBar(d) + confRow(d)
+        + '<span class="text-link">مشاهدهٔ آگهی ←</span></a></article>';
+    }).join('') : '<p class="empty">فرصتی با این جست‌وجو و فیلتر پیدا نشد.</p>';
+    document.getElementById('filterStatus').textContent = faNum(items.length) + ' فرصت نمایش داده شد';
+    if (animateNow && !reduceMotion){ cardsEl.classList.remove('is-staggering'); void cardsEl.offsetWidth; cardsEl.classList.add('is-staggering'); }
+  }
+  document.getElementById('dealSearch').addEventListener('input', function(){ query = this.value; renderCards(true); });
+
+  fetch('deals.json').then(function(r){ return r.json(); }).then(function(j){
+    var ds = j.deals || [];
+    window.PAGE_DEALS = ds;
+    renderTicker(ds);
+    var minPct = ds.length ? Math.min.apply(null, ds.map(dealDiscount)) : 0;
+    animateNumber('heroCountNum', ds.length, 720);
+    animateNumber('heroMinNum', minPct, 950);
+    buildTabs(ds);
+    renderFeature(); renderCards(false); renderSaved(); startFeatureTimer();
+    var u = document.getElementById('updated'); if (u && j.updated_fa) u.textContent = 'آخرین به‌روزرسانی: ' + j.updated_fa;
+    if (!reduceMotion && 'IntersectionObserver' in window){
+      var obs = new IntersectionObserver(function(es){ if (es[0].isIntersecting){ cardsEl.classList.add('is-staggering'); obs.disconnect(); } }, { threshold: 0.16 });
+      obs.observe(cardsEl);
+    }
+  }).catch(function(){
+    document.getElementById('cards').innerHTML = '<p class="empty">خطا در بارگذاری فرصت‌ها؛ لطفاً صفحه را تازه کن.</p>';
+  });
+})();
 </script>
 </body>
 </html>
 """
+
 
 PAGE_HTML = """<!doctype html>
 <html lang="fa" dir="rtl">
@@ -768,12 +552,20 @@ PAGE_HTML = """<!doctype html>
 <style>{STYLE}</style>
 </head>
 <body>
-<header class="topbar"><a class="brand" href="../index.html">قاپ<small>شکار فرصت‌های زیرقیمت</small></a>{NAV}</header>
+{MASTHEAD}
+{EDITION}
+{CHIPS}
 <main>
-<div class="page-head"><span class="eyebrow">{EYEBROW}</span><h1>{H1}</h1><p class="intro">{INTRO}</p></div>
-<section class="board-section"><div class="board-shell"><div class="cards">{CARDS}</div></div></section>
+<div class="wrap page-head"><span class="kicker">{EYEBROW}</span><h1>{H1}</h1><p class="intro">{INTRO}</p></div>
+<section class="wrap section"><div class="cards">{CARDS}</div></section>
 </main>
 {FOOT}
+<script>
+window.PAGE_DEALS = {PAGE_DEALS_JSON};
+</script>
+<script>
+{SHARED_JS}
+</script>
 </body>
 </html>
 """
@@ -791,36 +583,49 @@ def build(db_path, out_path, limit=80):
     cats.sort(key=lambda c: list(CATS).index(c))
 
     updated_fa = tehran_now_fa()
-    nav = nav_html(cities, cats)
     urls = [f"{SITE_URL}/"]
     os.makedirs(out_path, exist_ok=True)
     os.makedirs(os.path.join(out_path, "city"), exist_ok=True)
     os.makedirs(os.path.join(out_path, "cat"), exist_ok=True)
 
     deals = load_deals(db_path, limit)
-    for d in deals:
-        d["icon"] = CAT_ICON.get(d["category"], "home")
     payload = {"deals": deals, "updated_fa": updated_fa, "count": len(deals)}
     with open(os.path.join(out_path, "deals.json"), "w", encoding="utf-8") as f:
         json.dump(payload, f, ensure_ascii=False)
 
-    idx = INDEX_HTML.replace("{STYLE}", STYLE).replace("{NAV}", nav).replace("{FOOT}", FOOT)
-    idx = idx.replace("{ICONS_JS}", json.dumps(ICON_SVG)).replace("{CATFA_JS}", json.dumps(CAT_FA))
-    idx = idx.replace('id="updated"></span>', f'id="updated">آخرین به‌روزرسانی: {updated_fa}</span>')
+    idx = INDEX_HTML.replace("{STYLE}", STYLE)
+    idx = idx.replace("{MASTHEAD}", masthead_html())
+    idx = idx.replace("{EDITION}", edition_html(updated_fa))
+    idx = idx.replace("{FOOT}", FOOT_HTML)
+    idx = idx.replace("{ICONS_JS}", json.dumps(ICON_PATHS))
+    idx = idx.replace("window.PAGE_DEALS = [];",
+                      "window.PAGE_DEALS = [];\nwindow.CAT_FA_MAP = " + json.dumps(CAT_FA) + ";")
+    idx = idx.replace("{SHARED_JS}", SHARED_JS)
+    idx = idx.replace('id="updated"></span>',
+                      'id="updated">آخرین به‌روزرسانی: ' + updated_fa + '</span>')
     with open(os.path.join(out_path, "index.html"), "w", encoding="utf-8") as f:
         f.write(idx)
 
     for city in cities:
         cdeals = load_deals(db_path, 60, city=city)
         slug = city_slug(city)
-        cards = "".join(card_html(d) for d in cdeals) or '<div class="empty">فعلاً آگهی زیرقیمتی در این شهر ثبت نشده.</div>'
-        pg = PAGE_HTML.replace("{TITLE}", f"فرصت‌های {city}").replace("{DESC}", f"آگهی‌های زیرقیمت {city} در قاپ")
-        pg = pg.replace("{STYLE}", STYLE).replace("{NAV}", nav_html(cities, cats, prefix="../", active_city=city))
-        pg = pg.replace("{FOOT}", FOOT).replace("{EYEBROW}", "فرصت‌های شهری")
+        cards = "".join(card_static_html(d) for d in cdeals) or \
+            '<div class="empty-box">فعلاً آگهی زیرقیمتی در این شهر ثبت نشده.</div>'
+        pg = PAGE_HTML.replace("{TITLE}", f"فرصت‌های {city}")
+        pg = pg.replace("{DESC}", f"آگهی‌های زیرقیمت {city} در قاپ")
+        pg = pg.replace("{STYLE}", STYLE)
+        pg = pg.replace("{MASTHEAD}", masthead_html(prefix="../", index_mode=False))
+        pg = pg.replace("{EDITION}", edition_html(updated_fa))
+        pg = pg.replace("{CHIPS}", chips_html(cities, cats, prefix="../", active_city=city))
+        pg = pg.replace("{FOOT}", FOOT_HTML)
+        pg = pg.replace("{EYEBROW}", "فرصت‌های شهری")
         pg = pg.replace("{H1}", f"فرصت‌های زیرقیمت {city}")
         pg = pg.replace("{INTRO}", f"{fa_num(len(cdeals))} آگهی زیرقیمت در {city} — با مقایسه قیمت آگهی و برآورد منصفانه بازار.")
         pg = pg.replace("{CARDS}", cards)
-        pg = pg.replace('id="updated"></span>', f'id="updated">آخرین به‌روزرسانی: {updated_fa}</span>')
+        pg = pg.replace("{PAGE_DEALS_JSON}", json.dumps(cdeals, ensure_ascii=False))
+        pg = pg.replace("{SHARED_JS}", SHARED_JS)
+        pg = pg.replace('id="updated"></span>',
+                        'id="updated">آخرین به‌روزرسانی: ' + updated_fa + '</span>')
         with open(os.path.join(out_path, "city", f"{slug}.html"), "w", encoding="utf-8") as f:
             f.write(pg)
         urls.append(f"{SITE_URL}/city/{slug}.html")
@@ -829,14 +634,23 @@ def build(db_path, out_path, limit=80):
         code = cat if cat != "cars" else "car"
         cdeals = load_deals(db_path, 60, category=cat)
         slug = CATS[code][0]
-        cards = "".join(card_html(d) for d in cdeals) or '<div class="empty">فعلاً آگهی زیرقیمتی در این دسته ثبت نشده.</div>'
-        pg = PAGE_HTML.replace("{TITLE}", CATS[code][1]).replace("{DESC}", CATS[code][2])
-        pg = pg.replace("{STYLE}", STYLE).replace("{NAV}", nav_html(cities, cats, prefix="../", active_cat=code))
-        pg = pg.replace("{FOOT}", FOOT).replace("{EYEBROW}", "فرصت‌های دسته‌بندی")
+        cards = "".join(card_static_html(d) for d in cdeals) or \
+            '<div class="empty-box">فعلاً آگهی زیرقیمتی در این دسته ثبت نشده.</div>'
+        pg = PAGE_HTML.replace("{TITLE}", CATS[code][1])
+        pg = pg.replace("{DESC}", CATS[code][2])
+        pg = pg.replace("{STYLE}", STYLE)
+        pg = pg.replace("{MASTHEAD}", masthead_html(prefix="../", index_mode=False))
+        pg = pg.replace("{EDITION}", edition_html(updated_fa))
+        pg = pg.replace("{CHIPS}", chips_html(cities, cats, prefix="../", active_cat=code))
+        pg = pg.replace("{FOOT}", FOOT_HTML)
+        pg = pg.replace("{EYEBROW}", "فرصت‌های دسته‌بندی")
         pg = pg.replace("{H1}", f"فرصت‌های {CATS[code][1]}")
         pg = pg.replace("{INTRO}", f"{fa_num(len(cdeals))} آگهی زیرقیمت در دسته {CATS[code][1]}.")
         pg = pg.replace("{CARDS}", cards)
-        pg = pg.replace('id="updated"></span>', f'id="updated">آخرین به‌روزرسانی: {updated_fa}</span>')
+        pg = pg.replace("{PAGE_DEALS_JSON}", json.dumps(cdeals, ensure_ascii=False))
+        pg = pg.replace("{SHARED_JS}", SHARED_JS)
+        pg = pg.replace('id="updated"></span>',
+                        'id="updated">آخرین به‌روزرسانی: ' + updated_fa + '</span>')
         with open(os.path.join(out_path, "cat", f"{slug}.html"), "w", encoding="utf-8") as f:
             f.write(pg)
         urls.append(f"{SITE_URL}/cat/{slug}.html")
