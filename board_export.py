@@ -192,6 +192,25 @@ STYLE = """
     .empty-box{padding:60px 20px;text-align:center;color:var(--muted);border:1px dashed var(--line);border-radius:18px;background:var(--card)}
     @media(max-width:820px){.nav{display:none}.hero{grid-template-columns:1fr;gap:30px;padding:46px 0}.hero h1{letter-spacing:-2px}.hero-aside{display:grid;grid-template-columns:auto 1fr;align-items:center;gap:15px}.feature{grid-template-columns:1fr}.visual{min-height:260px;border:0;border-bottom:1px solid var(--line)}.cards,.method{grid-template-columns:1fr}.step{min-height:0}.section-head{display:block}.section-note{margin-top:12px}.discovery-tools{grid-template-columns:1fr}.filter-bar{align-items:flex-start;flex-direction:column}.foot{grid-template-columns:1fr}.section{padding-bottom:48px}.edition .wrap{align-items:flex-start;flex-direction:column;gap:1px}}
     @media(max-width:480px){.wrap{width:min(100% - 24px,var(--max))}.hero h1{font-size:39px}.lede{font-size:16px}.feature{margin:4px 2px;box-shadow:5px 5px 0 var(--soft)}.feature-copy{padding:23px}.visual .stamp{width:78px;height:78px;font-size:13px;top:16px;left:16px}.ticker-run{font-size:11px}.tab{padding:6px 12px}.live-badge{display:none}.brand{font-size:24px}.mast-tools{gap:6px}.icon-button{font-size:11px;padding:6px 9px}.deal-bar-head{font-size:10px}}
+    .auth-phone{font-size:12px;font-weight:800;white-space:nowrap}
+    .auth-backdrop{position:fixed;inset:0;background:rgba(4,25,27,.55);z-index:60;display:grid;place-items:center;padding:20px;opacity:0;visibility:hidden;pointer-events:none;transition:opacity .2s,visibility 0s linear .2s}
+    .auth-backdrop.is-open{opacity:1;visibility:visible;pointer-events:auto;transition-delay:0s}
+    .auth-modal{background:var(--paper);color:var(--ink);border:3px solid var(--line);border-radius:18px;box-shadow:8px 8px 0 var(--soft);width:min(430px,100%);padding:28px}
+    .auth-modal h2{margin:0 0 6px;font-size:24px;letter-spacing:-.5px}
+    .auth-modal p{color:var(--muted);font-size:14px;margin:0 0 18px}
+    .auth-field{display:grid;gap:6px;margin-bottom:6px;font-size:13px;font-weight:800}
+    .auth-field input{border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:0;padding:12px 14px;font:inherit;direction:ltr;text-align:center;letter-spacing:3px}
+    .auth-field input:focus{box-shadow:inset 0 -4px 0 var(--accent);outline:none}
+    .auth-err{color:var(--danger);font-size:13px;min-height:22px;margin:4px 0 8px}
+    .auth-demo{background:var(--soft);border:1px dashed var(--line);border-radius:10px;padding:10px 14px;font-size:13px;margin:0 0 12px;color:var(--muted)}
+    .auth-demo b{font-size:19px;letter-spacing:5px;color:var(--ink)}
+    .auth-actions{display:flex;gap:10px;flex-wrap:wrap}
+    .card.is-locked .lock-cta{margin-top:16px;border:1px dashed var(--line);background:transparent;color:var(--ink);border-radius:10px;padding:11px;cursor:pointer;font-weight:800;width:100%;font-size:14px}
+    .card.is-locked .lock-cta:hover{background:var(--accent);color:#082f33}
+    .lock-note{border:1px dashed var(--line);border-radius:18px;background:var(--card);padding:28px;text-align:center;margin-top:24px}
+    .lock-note p{color:var(--muted);margin:0 0 16px}
+    .feature-lock{margin-top:22px;border-top:1px solid var(--quiet);padding-top:18px}
+    .feature-lock p{color:var(--muted);font-size:14px;margin:0 0 12px}
 """
 
 
@@ -258,6 +277,168 @@ SHARED_JS = """
   var dayStart = Date.UTC(Number(dp.year), 0, 1), today = Date.UTC(Number(dp.year), Number(dp.month) - 1, Number(dp.day));
   var dayNumber = Math.floor((today - dayStart) / 86400000) + 1;
   var en = document.getElementById('editionNumber'); if (en) en.textContent = 'شمارهٔ روز ' + faNum(dayNumber);
+
+  /* ---------- auth: Dallal-style phone login (demo SMS) ---------- */
+  var AUTH_KEY = 'qap-auth-v1';
+  window.qapAuth = {
+    get: function(){ try { var a = JSON.parse(localStorage.getItem(AUTH_KEY) || 'null'); return (a && a.phone) ? a : null; } catch(e){ return null; } },
+    isLoggedIn: function(){ return !!this.get(); },
+    phone: function(){ var a = this.get(); return a ? a.phone : ''; },
+    login: function(phone){ try { localStorage.setItem(AUTH_KEY, JSON.stringify({ phone: phone, ts: Date.now() })); } catch(e){} document.dispatchEvent(new CustomEvent('qap-auth')); },
+    logout: function(){ try { localStorage.removeItem(AUTH_KEY); } catch(e){} document.dispatchEvent(new CustomEvent('qap-auth')); }
+  };
+  window.maskPhone = function(p){ var d = String(p).replace(/\\D/g, ''); if (d.length < 7) return faNum(d); return faNum(d.slice(0, 4)) + '···' + faNum(d.slice(-4)); };
+  window.faToEn = function(s){ return String(s).replace(/[۰-۹]/g, function(x){ return '۰۱۲۳۴۵۶۷۸۹'.indexOf(x); }); };
+  function syncAuthBtn(){
+    var btn = document.getElementById('authBtn'), ph = document.getElementById('authPhone');
+    var logged = window.qapAuth.isLoggedIn();
+    if (btn) btn.textContent = logged ? 'خروج' : 'ورود';
+    if (ph){ ph.hidden = !logged; if (logged) ph.textContent = maskPhone(window.qapAuth.phone()); }
+  }
+  window.syncAuthBtn = syncAuthBtn;
+  var authBackdrop = document.getElementById('authBackdrop');
+  window.openAuthModal = function(note){
+    if (!authBackdrop) return;
+    if (note){ var d = document.getElementById('authDesc'); if (d) d.textContent = note; }
+    document.getElementById('authStep1').hidden = false;
+    document.getElementById('authStep2').hidden = true;
+    document.getElementById('authErr1').textContent = '';
+    document.getElementById('authErr2').textContent = '';
+    document.getElementById('authPhoneInput').value = '';
+    document.getElementById('authCodeInput').value = '';
+    authBackdrop.hidden = false;
+    authBackdrop.classList.add('is-open');
+    document.body.style.overflow = 'hidden';
+    setTimeout(function(){ document.getElementById('authPhoneInput').focus(); }, 60);
+  };
+  window.closeAuthModal = function(){
+    if (!authBackdrop) return;
+    authBackdrop.classList.remove('is-open');
+    document.body.style.overflow = '';
+    setTimeout(function(){ authBackdrop.hidden = true; }, 220);
+  };
+  window.requireLogin = window.openAuthModal;
+  /* Demo SMS backend: no SMS provider is wired. In production, POST the phone
+     to your SMS API here and verify the code server-side. */
+  window.sendSmsCode = function(phone){
+    var code = String(Math.floor(1000 + Math.random() * 9000));
+    window._demoCode = code; window._demoPhone = phone;
+    return code;
+  };
+  document.addEventListener('click', function(e){
+    if (e.target.closest('[data-login]')) window.openAuthModal();
+    if (e.target.closest('[data-auth-close]')) window.closeAuthModal();
+  });
+  document.addEventListener('keydown', function(e){ if (e.key === 'Escape') window.closeAuthModal(); });
+  var authBtn = document.getElementById('authBtn');
+  if (authBtn) authBtn.addEventListener('click', function(){
+    if (window.qapAuth.isLoggedIn()) window.qapAuth.logout(); else window.openAuthModal();
+  });
+  var sendBtn = document.getElementById('authSendCode');
+  if (sendBtn) sendBtn.addEventListener('click', function(){
+    var v = faToEn(document.getElementById('authPhoneInput').value).replace(/[^0-9]/g, '');
+    var err = document.getElementById('authErr1');
+    if (!/^09\\d{9}$/.test(v)){ err.textContent = 'شمارهٔ موبایل معتبر وارد کنید (مثل 09123456789).'; return; }
+    err.textContent = '';
+    var code = window.sendSmsCode(v);
+    document.getElementById('authPhoneEcho').textContent = faNum(v);
+    document.getElementById('authDemoCode').textContent = faNum(code);
+    document.getElementById('authStep1').hidden = true;
+    document.getElementById('authStep2').hidden = false;
+    setTimeout(function(){ document.getElementById('authCodeInput').focus(); }, 60);
+  });
+  var verifyBtn = document.getElementById('authVerify');
+  if (verifyBtn) verifyBtn.addEventListener('click', function(){
+    var v = faToEn(document.getElementById('authCodeInput').value).replace(/[^0-9]/g, '');
+    var err = document.getElementById('authErr2');
+    if (v === window._demoCode && window._demoPhone){ window.qapAuth.login(window._demoPhone); window.closeAuthModal(); }
+    else err.textContent = 'کد تأیید درست نیست؛ دوباره تلاش کنید.';
+  });
+  syncAuthBtn();
+  document.addEventListener('qap-auth', syncAuthBtn);
+
+  /* ---------- shared card renderers (used by city/cat pages) ---------- */
+  window.qapIcon = window.qapIcon || function(type){
+    var paths = window.ICONS || {};
+    return '<svg viewBox="0 0 96 96" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round" aria-hidden="true">' + (paths[type] || paths.home || '') + '</svg>';
+  };
+  window.qapDealBar = window.qapDealBar || function(d){
+    var pct = dealDiscount(d);
+    return '<div class="deal-bar" aria-label="فاصله از قیمت همتا ' + faNum(pct) + ' درصد"><div class="deal-bar-head"><span>فاصله از همتا</span><strong>' + faNum(pct) + '٪ زیر بازار</strong></div><div class="deal-bar-track"><div class="deal-bar-fill" style="width:' + Math.min(100, pct * 3) + '%"></div></div></div>';
+  };
+  window.qapMeter = window.qapMeter || function(d){
+    var pct = d.fair_price ? Math.max(0, Math.min(100, Math.round(d.price / d.fair_price * 100))) : 100;
+    return '<div class="meter" aria-label="قیمت آگهی ' + faNum(pct) + ' درصد قیمت همتا است"><div class="meter-labels"><span>آگهی: ' + faPrice(d.price) + ' تومان</span><span>همتا: ' + faPrice(d.fair_price) + ' تومان</span></div><div class="meter-track"><div class="meter-fill" style="width:' + pct + '%"></div></div></div>';
+  };
+  window.lockedCardHTML = window.lockedCardHTML || function(d){
+    var pct = dealDiscount(d);
+    return '<article class="card is-locked">' + bookmarkHTML(d)
+      + '<div class="card-main"><div class="card-icon">' + window.qapIcon(d.icon) + '</div>'
+      + '<div class="meta"><span>' + d.cat_fa + '</span><span>' + d.city + '</span></div>'
+      + '<h3><span class="mark">' + faNum(pct) + '٪</span> زیر قیمت همتا</h3>'
+      + window.qapDealBar(d)
+      + '<div class="confidence">' + faNum(d.n_comps) + ' نمونهٔ همتا · اطمینان ' + dealConf(d.n_comps) + '</div>'
+      + '<button class="lock-cta" type="button" data-login>برای دیدن جزئیات آگهی وارد شوید</button>'
+      + '</div></article>';
+  };
+  window.fullCardHTML = window.fullCardHTML || function(d){
+    var pct = dealDiscount(d);
+    return '<article class="card">' + bookmarkHTML(d)
+      + '<div class="card-main"><div class="card-icon">' + window.qapIcon(d.icon) + '</div>'
+      + '<div class="meta"><span>' + d.cat_fa + '</span><span>' + (d.district || d.city) + '</span></div>'
+      + '<h3><span class="mark">' + faNum(pct) + '٪</span> زیر قیمت همتا</h3>'
+      + '<div class="deal-title">' + d.title + '</div>'
+      + window.qapMeter(d) + window.qapDealBar(d)
+      + '<div class="confidence">' + faNum(d.n_comps) + ' نمونهٔ همتا · اطمینان ' + dealConf(d.n_comps) + '</div>'
+      + '</div></article>';
+  };
+  window.lockNoteHTML = window.lockNoteHTML || function(){
+    return '<div class="lock-note"><p>۱۰ فرصت اول رایگان است؛ بقیه و جزئیات هر فرصت (عنوان، قیمت، محله) فقط با ورود.</p><button class="primary" type="button" data-login>ورود با شمارهٔ موبایل</button></div>';
+  };
+  function paintStatic(logged){
+    var wrap = document.querySelector('main .cards'); if (!wrap) return;
+    var ds = window.PAGE_DEALS || [];
+    var items = logged ? ds : ds.slice(0, 10);
+    wrap.innerHTML = items.map(function(d){ return logged ? window.fullCardHTML(d) : window.lockedCardHTML(d); }).join('')
+      + ((!logged && ds.length > 10) ? window.lockNoteHTML() : '');
+  }
+  window.paintStatic = paintStatic;
+  function renderStaticCards(){
+    var wrap = document.querySelector('main .cards'); if (!wrap || document.getElementById('dealSearch')) return;
+    var logged = window.qapAuth.isLoggedIn();
+    if (logged && !window.PAGE_DEALS_FULL){
+      var pub = window.PAGE_DEALS_PUBLIC || [];
+      if (!pub.length) return;
+      var isCity = location.pathname.indexOf('/city/') > -1;
+      var val = isCity ? pub[0].city : pub[0].category;
+      fetch(window.DEALS_FULL_URL || '../deals-full.json').then(function(r){ return r.json(); }).then(function(j){
+        var all = j.deals || [];
+        window.PAGE_DEALS_FULL = all.filter(function(d){ return isCity ? d.city === val : d.category === val; });
+        window.PAGE_DEALS = window.PAGE_DEALS_FULL;
+        paintStatic(true); renderSaved();
+      }).catch(function(){});
+      return;
+    }
+    window.PAGE_DEALS = logged ? (window.PAGE_DEALS_FULL || window.PAGE_DEALS_PUBLIC) : window.PAGE_DEALS_PUBLIC;
+    paintStatic(logged);
+  }
+  window.renderStaticCards = renderStaticCards;
+  document.addEventListener('qap-auth', function(){ renderStaticCards(); renderSaved(); });
+
+  function renderSaved(){
+    var list = document.getElementById('savedList'); if (!list) return;
+    var logged = window.qapAuth.isLoggedIn();
+    var items = Array.from(window.savedDeals).map(window.dealById).filter(Boolean);
+    var cnt = document.getElementById('savedCount'); if (cnt) cnt.textContent = faNum(items.length);
+    list.innerHTML = items.length ? items.map(function(d){
+      var head = logged ? d.title : ('فرصت ' + faNum(dealDiscount(d)) + '٪ زیر قیمت همتا');
+      var sub = faNum(dealDiscount(d)) + '٪ زیر قیمت همتا · ' + d.city + ' · ' + d.cat_fa
+        + (logged ? '' : ' · <button class="text-link" type="button" data-login>ورود برای جزئیات</button>');
+      return '<article class="saved-item"><h3>' + head + '</h3><p>' + sub + '</p></article>';
+    }).join('') : '<p class="empty">هنوز فرصتی نشان نکرده‌ای.</p>';
+  }
+  window.renderSaved = renderSaved;
+  renderStaticCards();
   renderSaved();
 })();
 """
@@ -283,22 +464,27 @@ def deal_bar_html(d):
 
 
 def card_static_html(d, delay_ms=0):
-    """Server-rendered deal card (city/cat pages) — mirrors the client renderer."""
+    """Server-rendered LOCKED deal card (city/cat pages) — analysis only; details unlock after login."""
     pct = round(d["pct_below_fair"] * 100)
     icon = ICON_SVG.get(d.get("icon", "home"), ICON_SVG["home"])
-    loc = d["district"] or d["city"]
     return (
-        '<article class="card" style="--delay:' + str(delay_ms) + 'ms">'
+        '<article class="card is-locked" style="--delay:' + str(delay_ms) + 'ms">'
         + bookmark_static_html(d) +
         '<div class="card-main">'
         '<div class="card-icon">' + icon + '</div>'
-        '<div class="meta"><span>' + d["cat_fa"] + '</span><span>' + loc + '</span></div>'
+        '<div class="meta"><span>' + d["cat_fa"] + '</span><span>' + d["city"] + '</span></div>'
         '<h3><span class="mark">' + fa_num(pct) + '٪</span> زیر قیمت همتا</h3>'
-        '<div class="deal-title">' + d["title"] + '</div>'
-        + meter_html(d) + deal_bar_html(d) +
+        + deal_bar_html(d) +
         '<div class="confidence">' + fa_num(d["n_comps"]) + ' نمونهٔ همتا · اطمینان ' + _conf(d["n_comps"]) + '</div>'
+        '<button class="lock-cta" type="button" data-login>برای دیدن جزئیات آگهی وارد شوید</button>'
         '</div></article>'
     )
+
+
+def lock_note_static_html():
+    return ('<div class="lock-note"><p>۱۰ فرصت اول رایگان است؛ بقیه و جزئیات هر فرصت '
+            '(عنوان، قیمت، محله) فقط با ورود.</p>'
+            '<button class="primary" type="button" data-login>ورود با شمارهٔ موبایل</button></div>')
 
 
 def bookmark_static_html(d):
@@ -322,6 +508,8 @@ def masthead_html(prefix="", index_mode=True):
         '<a class="brand" href="' + brand_href + '" aria-label="قاپ">قاپ</a>' + nav +
         '<div class="mast-tools">'
         '<span class="live-badge"><i></i>برد زنده</span>'
+        '<span class="auth-phone" id="authPhone" hidden></span>'
+        '<button class="icon-button" id="authBtn" type="button">ورود</button>'
         '<button class="icon-button" id="themeToggle" type="button" aria-pressed="false">حالت شب</button>'
         '<button class="icon-button" id="savedToggle" type="button" aria-haspopup="dialog">لیست من · '
         '<span id="savedCount">۰</span></button>'
@@ -359,6 +547,22 @@ FOOT_HTML = (
     '<button class="icon-button" id="savedClose" type="button">بستن</button></div>'
     '<div class="drawer-list" id="savedList"></div>'
     '<p class="session-note">انتخاب‌ها در همین مرورگر ذخیره می‌شوند.</p></aside></div>'
+    '<div class="auth-backdrop" id="authBackdrop" role="dialog" aria-modal="true" aria-labelledby="authTitle" hidden>'
+    '<div class="auth-modal"><h2 id="authTitle">ورود با شمارهٔ موبایل</h2>'
+    '<p id="authDesc">جزئیات هر فرصت (عنوان، قیمت، محله) فقط برای کاربران واردشده نمایش داده می‌شود. بدون تمدید خودکار.</p>'
+    '<div id="authStep1"><label class="auth-field">شمارهٔ موبایل'
+    '<input id="authPhoneInput" inputmode="numeric" maxlength="11" placeholder="09123456789" autocomplete="tel"></label>'
+    '<p class="auth-err" id="authErr1"></p>'
+    '<div class="auth-actions"><button class="primary" id="authSendCode" type="button">ارسال کد تأیید</button>'
+    '<button class="icon-button" data-auth-close type="button">انصراف</button></div></div>'
+    '<div id="authStep2" hidden><p>کد تأیید به <b id="authPhoneEcho"></b> پیامک شد.</p>'
+    '<div class="auth-demo">نسخهٔ آزمایشی — کد شما: <b id="authDemoCode"></b><br>'
+    '<span style="font-size:12px">برای ارسال پیامک واقعی، سرویس پیامکی به همین‌جا وصل می‌شود.</span></div>'
+    '<label class="auth-field">کد تأیید<input id="authCodeInput" inputmode="numeric" maxlength="6" placeholder="‐ ‐ ‐ ‐"></label>'
+    '<p class="auth-err" id="authErr2"></p>'
+    '<div class="auth-actions"><button class="primary" id="authVerify" type="button">ورود</button>'
+    '<button class="icon-button" data-auth-close type="button">انصراف</button></div></div>'
+    '</div></div>'
 ).replace("DISCLAIMER_TXT", DISCLAIMER)
 
 
@@ -386,7 +590,7 @@ INDEX_HTML = """<!doctype html>
   <section class="wrap hero">
     <div><p class="kicker">صفحهٔ اول / شکار زیرقیمت‌ها</p>
       <h1><span class="mark"><span class="outline-number" id="heroCountNum">۰</span> فرصت</span> در آگهی‌های امروز؛ هر کدام دست‌کم <span class="mark"><span class="outline-number" id="heroMinNum">۰</span>٪</span> زیر قیمت همتای خودش</h1>
-      <p class="lede">قاپ آگهی را جدا از هیاهوی بازار می‌سنجد: قیمت، ویژگی‌ها و نمونه‌های همتا کنار هم قرار می‌گیرند تا موردی که واقعاً ارزش بررسی دارد، زودتر دیده شود.</p>
+      <p class="lede">قاپ آگهی را جدا از هیاهوی بازار می‌سنجد: قیمت، ویژگی‌ها و نمونه‌های همتا کنار هم قرار می‌گیرند تا موردی که واقعاً ارزش بررسی دارد، زودتر دیده شود. تحلیل هر فرصت برای همه باز است؛ عنوان، قیمت و محلهٔ آگهی فقط با ورود با شمارهٔ موبایل.</p>
       <div class="actions"><a class="primary" href="#opportunities">فرصت‌ها را نشانم بده <span aria-hidden="true">←</span></a><a class="text-link" href="#method">قاپ چطور حساب می‌کند؟</a></div>
     </div>
     <aside class="hero-aside"><div><span class="pulse"></span><strong class="outline-number"><span id="cycleCount">۳۰</span>′</strong></div><p>بازار هر سی دقیقه دوباره خوانده و فرصت‌ها از نو رتبه‌بندی می‌شوند.</p></aside>
@@ -394,11 +598,11 @@ INDEX_HTML = """<!doctype html>
 
   <section class="wrap section" id="opportunities"><div class="section-head"><div><p class="kicker">خبر اصلی</p><h2>فرصتی با فاصلهٔ روشن از بازار</h2></div><p class="section-note">پیش از هر تصمیم، اصل آگهی و وضعیت واقعی کالا را بررسی کن؛ قاپ فقط نقطهٔ شروع را نشان می‌دهد.</p></div><article class="feature" id="featureCard" aria-live="polite"></article><div class="feature-nav"><div class="feature-dots" id="featureDots" aria-label="انتخاب فرصت شاخص"></div><div class="feature-progress" aria-hidden="true"><span id="featureProgress"></span></div><button class="icon-button" id="featurePause" type="button" aria-pressed="false">مکث</button></div></section>
 
-  <section class="wrap section"><div class="section-head"><div><p class="kicker">ویترین</p><h2>فرصت‌های دیگر، بدون شلوغی</h2></div><p class="section-note">هر کارت فقط اطلاعاتی را نشان می‌دهد که برای تصمیم اول لازم است: فاصله از همتا، تعداد مقایسه و درجهٔ اطمینان.</p></div><div class="discovery-tools"><label class="search-label" for="dealSearch">جست‌وجو در فرصت‌ها<input class="search" id="dealSearch" type="search" inputmode="search" placeholder="مثلاً تبریز، دنا یا موبایل" autocomplete="off"></label><div class="filter-bar"><div class="tabs" id="tabs" role="group" aria-label="فیلتر سریع شهر و دسته"></div><span class="filter-status" id="filterStatus" aria-live="polite"></span></div></div><div class="cards" id="cards"></div></section>
+  <section class="wrap section"><div class="section-head"><div><p class="kicker">ویترین</p><h2>فرصت‌های دیگر، بدون شلوغی</h2></div><p class="section-note">سطرهای تحلیل (فاصله از همتا، تعداد مقایسه و درجهٔ اطمینان) برای همه باز است؛ ۱۰ فرصت اول رایگان، جزئیات هر آگهی فقط با ورود.</p></div><div class="discovery-tools"><label class="search-label" for="dealSearch">جست‌وجو در فرصت‌ها<input class="search" id="dealSearch" type="search" inputmode="search" placeholder="مثلاً تبریز، دنا یا موبایل" autocomplete="off"></label><div class="filter-bar"><div class="tabs" id="tabs" role="group" aria-label="فیلتر سریع شهر و دسته"></div><span class="filter-status" id="filterStatus" aria-live="polite"></span></div></div><div class="cards" id="cards"></div></section>
 
   <section class="wrap section" id="method"><div class="section-head"><div><p class="kicker">روش قاپ</p><h2>از آگهی خام تا فرصت قابل بررسی</h2></div><p class="section-note">قاپ جای بازدید، کارشناسی یا استعلام را نمی‌گیرد؛ فقط مرحلهٔ پیدا کردن گزینه‌های امیدوارکننده را کوتاه می‌کند.</p></div><div class="method"><article class="step"><span class="num">۱</span><h3>خواندن بازار</h3><p>آگهی‌های تازهٔ ۳۱ مرکز استان در بازارهای ملک، خودرو و کالای دیجیتال جمع می‌شوند.</p></article><article class="step"><span class="num">۲</span><h3>پاک‌سازی</h3><p>آگهی‌های تکراری، بی‌قیمت یا دارای مشخصات ناسازگار از مقایسه کنار می‌روند.</p></article><article class="step"><span class="num">۳</span><h3>ساخت همتا</h3><p>هر مورد فقط با نمونه‌هایی سنجیده می‌شود که از نظر ویژگی‌های کلیدی به آن نزدیک‌اند.</p></article><article class="step"><span class="num">۴</span><h3>محاسبهٔ فاصله</h3><p>قیمت آگهی با میانهٔ همتاها مقایسه و درصد فاصله بدون بزرگ‌نمایی محاسبه می‌شود.</p></article><article class="step"><span class="num">۵</span><h3>سنجش اطمینان</h3><p>تعداد همتاها و پراکندگی قیمت‌ها تعیین می‌کند قاپ چقدر به نتیجه مطمئن باشد.</p></article><article class="step"><span class="num">۶</span><h3>پرچم احتیاط</h3><p>قیمت غیرعادی، توضیح مبهم یا تناقض مشخصات به‌جای پنهان شدن، کنار نتیجه می‌آید.</p></article></div></section>
 
-  <section class="wrap section" id="questions"><div class="section-head"><div><p class="kicker">پرسش‌های پیش از اعتماد</p><h2>شفاف، همان‌قدر که لازم است</h2></div></div><div class="faq"><details open><summary>آیا هر مورد زیرقیمت، معاملهٔ خوبی است؟</summary><p>نه. زیرقیمت بودن فقط نقطهٔ شروع بررسی است. اصالت آگهی، سلامت فنی، سند، بدهی، شرایط انتقال و علت فروش باید جداگانه بررسی شوند.</p></details><details><summary>«اطمینان بالا» یعنی چه؟</summary><p>یعنی برای مقایسه، همتای کافی وجود داشته و قیمت آن‌ها پراکندگی غیرعادی نداشته است؛ نه اینکه خود کالا یا فروشنده تأیید شده باشد.</p></details><details><summary>چرا یک آگهی ممکن است ناپدید شود؟</summary><p>ممکن است حذف یا فروخته شده باشد، قیمتش تغییر کند یا با ورود دادهٔ تازه دیگر زیر آستانهٔ فرصت قرار نگیرد.</p></details><details><summary>آیا قاپ به آگهی‌دهنده وابسته است؟</summary><p>رتبه‌بندی مستقل و بر اساس مقایسهٔ داده‌ها نمایش داده شده است؛ نمایش در فهرست به‌معنای توصیه یا تضمین معامله نیست.</p></details></div></section>
+  <section class="wrap section" id="questions"><div class="section-head"><div><p class="kicker">پرسش‌های پیش از اعتماد</p><h2>شفاف، همان‌قدر که لازم است</h2></div></div><div class="faq"><details open><summary>آیا هر مورد زیرقیمت، معاملهٔ خوبی است؟</summary><p>نه. زیرقیمت بودن فقط نقطهٔ شروع بررسی است. اصالت آگهی، سلامت فنی، سند، بدهی، شرایط انتقال و علت فروش باید جداگانه بررسی شوند.</p></details><details><summary>«اطمینان بالا» یعنی چه؟</summary><p>یعنی برای مقایسه، همتای کافی وجود داشته و قیمت آن‌ها پراکندگی غیرعادی نداشته است؛ نه اینکه خود کالا یا فروشنده تأیید شده باشد.</p></details><details><summary>چرا یک آگهی ممکن است ناپدید شود؟</summary><p>ممکن است حذف یا فروخته شده باشد، قیمتش تغییر کند یا با ورود دادهٔ تازه دیگر زیر آستانهٔ فرصت قرار نگیرد.</p></details><details><summary>چرا جزئیات آگهی را نمی‌بینم؟</summary><p>تحلیل هر فرصت — درصد زیر قیمت، تعداد همتا و درجهٔ اطمینان — برای همه باز است؛ ۱۰ فرصت اول هم رایگان‌اند. عنوان، قیمت و محلهٔ آگهی فقط بعد از ورود با شمارهٔ موبایل نمایش داده می‌شود.</p></details><details><summary>آیا قاپ به آگهی‌دهنده وابسته است؟</summary><p>رتبه‌بندی مستقل و بر اساس مقایسهٔ داده‌ها نمایش داده شده است؛ نمایش در فهرست به‌معنای توصیه یا تضمین معامله نیست.</p></details></div></section>
 
   <div class="promo"><div class="promo-box"><div><strong>خبرهای مهم را هم <span class="mark">از دست نده</span></strong><p>کانال تلگرامی خبراتور — گزیدهٔ مهم‌ترین خبرهای ایران و جهان</p></div><a href="https://t.me/khabarator" target="_blank" rel="noopener">عضویت در خبراتور</a></div></div>
 </main>
@@ -420,8 +624,12 @@ window.PAGE_DEALS = [];
   function shortTitle(t){ return t.length > 30 ? t.slice(0, 30) + '…' : t; }
 
   function renderTicker(data){
+    var logged = window.qapAuth.isLoggedIn();
     var top = data.slice().sort(function(a, b){ return b.pct_below_fair - a.pct_below_fair; }).slice(0, 6);
-    var items = top.map(function(d){ return '<span>' + d.city + ' · ' + shortTitle(d.title) + ' · ' + faNum(dealDiscount(d)) + '٪ پایین‌تر</span>'; }).join('<i class="dot"></i>');
+    var items = top.map(function(d){
+      var core = '<span>' + d.city + ' · ' + faNum(dealDiscount(d)) + '٪ پایین‌تر · اطمینان ' + dealConf(d.n_comps) + '</span>';
+      return logged ? '<span>' + d.city + ' · ' + shortTitle(d.title) + ' · ' + faNum(dealDiscount(d)) + '٪ پایین‌تر</span>' : core;
+    }).join('<i class="dot"></i>');
     var run = '<div class="ticker-run"><b>فرصت تازه</b><i class="dot"></i>' + items + '<i class="dot"></i><span>رصد ۳۱ مرکز استان · چرخهٔ ۳۰ دقیقه‌ای</span></div>';
     document.getElementById('tickerTrack').innerHTML = run + run.replace('ticker-run', 'ticker-run" aria-hidden="true');
   }
@@ -450,11 +658,17 @@ window.PAGE_DEALS = [];
     if (!tops.length){ featureEl.innerHTML = '<p class="empty" style="padding:40px">فعلاً آگهی زیرقیمتی ثبت نشده.</p>'; return; }
     var d = tops[featureIndex % tops.length], disc = dealDiscount(d);
     var badge = d.tier === 'golden' ? 'فرصت طلایی' : 'فرصت';
-    featureEl.innerHTML = '<div class="visual">' + bookmarkHTML(d) + icon(d.icon) + '<div class="stamp">' + faNum(disc) + '٪<br>پایین‌تر</div></div>'
-      + '<div class="feature-copy"><div class="meta"><span>' + d.cat_fa + '</span><span>' + d.city + '</span><span>' + badge + '</span></div>'
-      + '<h3>' + d.title + '</h3><div class="price">' + faPrice(d.price) + ' تومان</div>'
-      + meter(d) + dealBar(d) + confRow(d)
-      + '</div>';
+    var logged = window.qapAuth.isLoggedIn();
+    var copy = logged
+      ? '<div class="feature-copy"><div class="meta"><span>' + d.cat_fa + '</span><span>' + d.city + '</span><span>' + badge + '</span></div>'
+        + '<h3>' + d.title + '</h3><div class="price">' + faPrice(d.price) + ' تومان</div>'
+        + meter(d) + dealBar(d) + confRow(d) + '</div>'
+      : '<div class="feature-copy"><div class="meta"><span>' + d.cat_fa + '</span><span>' + d.city + '</span><span>' + badge + '</span></div>'
+        + '<h3><span class="mark">' + faNum(disc) + '٪</span> زیر قیمت همتا</h3>'
+        + dealBar(d) + confRow(d)
+        + '<div class="feature-lock"><p>عنوان، قیمت و محلهٔ این فرصت فقط برای کاربران واردشده نمایش داده می‌شود.</p>'
+        + '<button class="primary" type="button" data-login>ورود با شمارهٔ موبایل</button></div></div>';
+    featureEl.innerHTML = '<div class="visual">' + bookmarkHTML(d) + icon(d.icon) + '<div class="stamp">' + faNum(disc) + '٪<br>پایین‌تر</div></div>' + copy;
     document.getElementById('featureDots').innerHTML = tops.map(function(item, i){
       return '<button class="feature-dot" type="button" data-feature="' + i + '" aria-label="نمایش فرصت ' + faNum(i + 1) + '" aria-pressed="' + (i === featureIndex % tops.length) + '"></button>';
     }).join('');
@@ -490,41 +704,73 @@ window.PAGE_DEALS = [];
     var needle = query.trim();
     return window.PAGE_DEALS.filter(function(d){
       var ok = currentFilter === 'all' || (currentKind === 'city' ? d.city === currentFilter : d.category === currentFilter);
-      var hay = d.title + ' ' + d.city + ' ' + (d.district || '') + ' ' + d.cat_fa;
+      var hay = (d.title || '') + ' ' + d.city + ' ' + (d.district || '') + ' ' + d.cat_fa;
       return ok && (!needle || hay.indexOf(needle) > -1);
     });
   }
   function renderCards(animateNow){
+    var logged = window.qapAuth.isLoggedIn();
     var items = matchingItems();
+    if (!logged) items = items.slice(0, 10);
     cardsEl.innerHTML = items.length ? items.map(function(d, i){
-      var pct = dealDiscount(d);
-      return '<article class="card" style="--delay:' + (i * 110) + 'ms">' + bookmarkHTML(d)
-        + '<div class="card-main">'
-        + '<div class="card-icon">' + icon(d.icon) + '</div>' + metaRow(d)
-        + '<h3><span class="mark">' + faNum(pct) + '٪</span> زیر قیمت همتا</h3>'
-        + '<div class="deal-title">' + d.title + '</div>'
-        + meter(d) + dealBar(d) + confRow(d)
-        + '</div></article>';
-    }).join('') : '<p class="empty">فرصتی با این جست‌وجو و فیلتر پیدا نشد.</p>';
-    document.getElementById('filterStatus').textContent = faNum(items.length) + ' فرصت نمایش داده شد';
+      return logged ? window.fullCardHTML(d).replace('class="card"', 'class="card" style="--delay:' + (i * 110) + 'ms"')
+                    : window.lockedCardHTML(d).replace('class="card is-locked"', 'class="card is-locked" style="--delay:' + (i * 110) + 'ms"');
+    }).join('') + (!logged && matchingItems().length > 10 ? window.lockNoteHTML() : '')
+      : '<p class="empty">فرصتی با این جست‌وجو و فیلتر پیدا نشد.</p>';
+    document.getElementById('filterStatus').textContent = faNum(items.length) + ' فرصت نمایش داده شد' + (logged ? '' : ' (نمای تحلیل)');
     if (animateNow && !reduceMotion){ cardsEl.classList.remove('is-staggering'); void cardsEl.offsetWidth; cardsEl.classList.add('is-staggering'); }
   }
-  document.getElementById('dealSearch').addEventListener('input', function(){ query = this.value; renderCards(true); });
+  var searchInput = document.getElementById('dealSearch');
+  searchInput.addEventListener('focus', function(){
+    if (!window.qapAuth.isLoggedIn()){ this.blur(); window.openAuthModal('برای جست‌وجو در فرصت‌ها، اول وارد شوید.'); }
+  });
+  searchInput.addEventListener('input', function(){ query = this.value; renderCards(true); });
+  function authedRender(){
+    renderTicker(window.PAGE_DEALS); renderFeature(); renderCards(false); renderSaved();
+  }
+  document.addEventListener('qap-auth', function(){
+    var logged = window.qapAuth.isLoggedIn();
+    if (logged && !window.PAGE_DEALS_FULL){
+      fetch(window.DEALS_FULL_URL || 'deals-full.json').then(function(r){ return r.json(); }).then(function(j){
+        window.PAGE_DEALS_FULL = j.deals || [];
+        window.PAGE_DEALS = window.PAGE_DEALS_FULL;
+        authedRender();
+      }).catch(function(){ authedRender(); });
+    } else {
+      window.PAGE_DEALS = logged ? (window.PAGE_DEALS_FULL || window.PAGE_DEALS_PUBLIC) : window.PAGE_DEALS_PUBLIC;
+      authedRender();
+    }
+  });
 
-  fetch('deals.json').then(function(r){ return r.json(); }).then(function(j){
-    var ds = j.deals || [];
-    window.PAGE_DEALS = ds;
-    renderTicker(ds);
+  var bootUpdated = '';
+  function boot(ds){
     var minPct = ds.length ? Math.min.apply(null, ds.map(dealDiscount)) : 0;
     animateNumber('heroCountNum', ds.length, 720);
     animateNumber('heroMinNum', minPct, 950);
     buildTabs(ds);
+    renderTicker(window.PAGE_DEALS);
     renderFeature(); renderCards(false); renderSaved(); startFeatureTimer();
-    var u = document.getElementById('updated'); if (u && j.updated_fa) u.textContent = 'آخرین به‌روزرسانی: ' + j.updated_fa;
+    var u = document.getElementById('updated'); if (u && bootUpdated) u.textContent = 'آخرین به‌روزرسانی: ' + bootUpdated;
     if (!reduceMotion && 'IntersectionObserver' in window){
       var obs = new IntersectionObserver(function(es){ if (es[0].isIntersecting){ cardsEl.classList.add('is-staggering'); obs.disconnect(); } }, { threshold: 0.16 });
       obs.observe(cardsEl);
     }
+  }
+  fetch('deals.json').then(function(r){ return r.json(); }).then(function(j){
+    var ds = j.deals || [];
+    bootUpdated = j.updated_fa || '';
+    window.PAGE_DEALS_PUBLIC = ds;
+    window.PAGE_DEALS = ds;
+    window.DEALS_FULL_URL = 'deals-full.json';
+    if (window.qapAuth.isLoggedIn()){
+      fetch('deals-full.json').then(function(r){ return r.json(); }).then(function(j2){
+        window.PAGE_DEALS_FULL = j2.deals || [];
+        window.PAGE_DEALS = window.PAGE_DEALS_FULL;
+        boot(ds);
+      }).catch(function(){ boot(ds); });
+      return;
+    }
+    boot(ds);
   }).catch(function(){
     document.getElementById('cards').innerHTML = '<p class="empty">خطا در بارگذاری فرصت‌ها؛ لطفاً صفحه را تازه کن.</p>';
   });
@@ -560,6 +806,9 @@ PAGE_HTML = """<!doctype html>
 {FOOT}
 <script>
 window.PAGE_DEALS = {PAGE_DEALS_JSON};
+window.PAGE_DEALS_PUBLIC = window.PAGE_DEALS;
+window.ICONS = {ICONS_JS};
+window.DEALS_FULL_URL = '../deals-full.json';
 </script>
 <script>
 {SHARED_JS}
@@ -567,6 +816,12 @@ window.PAGE_DEALS = {PAGE_DEALS_JSON};
 </body>
 </html>
 """
+
+
+def public_deal(d):
+    """Public subset of a deal: analysis only — no ad details (title/price/district/url)."""
+    return {k: d[k] for k in
+            ("divar_token", "category", "cat_fa", "city", "pct_below_fair", "tier", "n_comps", "icon")}
 
 
 def build(db_path, out_path, limit=80):
@@ -587,9 +842,13 @@ def build(db_path, out_path, limit=80):
     os.makedirs(os.path.join(out_path, "cat"), exist_ok=True)
 
     deals = load_deals(db_path, limit)
-    payload = {"deals": deals, "updated_fa": updated_fa, "count": len(deals)}
+    # deals.json = PUBLIC payload (analysis only); ad details live in deals-full.json (fetched after login).
+    payload_public = {"deals": [public_deal(d) for d in deals], "updated_fa": updated_fa, "count": len(deals)}
+    payload_full = {"deals": deals, "updated_fa": updated_fa, "count": len(deals)}
     with open(os.path.join(out_path, "deals.json"), "w", encoding="utf-8") as f:
-        json.dump(payload, f, ensure_ascii=False)
+        json.dump(payload_public, f, ensure_ascii=False)
+    with open(os.path.join(out_path, "deals-full.json"), "w", encoding="utf-8") as f:
+        json.dump(payload_full, f, ensure_ascii=False)
 
     idx = INDEX_HTML.replace("{STYLE}", STYLE)
     idx = idx.replace("{MASTHEAD}", masthead_html())
@@ -607,11 +866,14 @@ def build(db_path, out_path, limit=80):
     for city in cities:
         cdeals = load_deals(db_path, 60, city=city)
         slug = city_slug(city)
-        cards = "".join(card_static_html(d) for d in cdeals) or \
+        cards = "".join(card_static_html(d) for d in cdeals[:10]) or \
             '<div class="empty-box">فعلاً آگهی زیرقیمتی در این شهر ثبت نشده.</div>'
+        if len(cdeals) > 10:
+            cards += lock_note_static_html()
         pg = PAGE_HTML.replace("{TITLE}", f"فرصت‌های {city}")
         pg = pg.replace("{DESC}", f"آگهی‌های زیرقیمت {city} در قاپ")
         pg = pg.replace("{STYLE}", STYLE)
+        pg = pg.replace("{ICONS_JS}", json.dumps(ICON_PATHS))
         pg = pg.replace("{MASTHEAD}", masthead_html(prefix="../", index_mode=False))
         pg = pg.replace("{EDITION}", edition_html(updated_fa))
         pg = pg.replace("{CHIPS}", chips_html(cities, cats, prefix="../", active_city=city))
@@ -620,7 +882,7 @@ def build(db_path, out_path, limit=80):
         pg = pg.replace("{H1}", f"فرصت‌های زیرقیمت {city}")
         pg = pg.replace("{INTRO}", f"{fa_num(len(cdeals))} آگهی زیرقیمت در {city} — با مقایسه قیمت آگهی و برآورد منصفانه بازار.")
         pg = pg.replace("{CARDS}", cards)
-        pg = pg.replace("{PAGE_DEALS_JSON}", json.dumps(cdeals, ensure_ascii=False))
+        pg = pg.replace("{PAGE_DEALS_JSON}", json.dumps([public_deal(d) for d in cdeals], ensure_ascii=False))
         pg = pg.replace("{SHARED_JS}", SHARED_JS)
         pg = pg.replace('id="updated"></span>',
                         'id="updated">آخرین به‌روزرسانی: ' + updated_fa + '</span>')
@@ -632,11 +894,14 @@ def build(db_path, out_path, limit=80):
         code = cat if cat != "cars" else "car"
         cdeals = load_deals(db_path, 60, category=cat)
         slug = CATS[code][0]
-        cards = "".join(card_static_html(d) for d in cdeals) or \
+        cards = "".join(card_static_html(d) for d in cdeals[:10]) or \
             '<div class="empty-box">فعلاً آگهی زیرقیمتی در این دسته ثبت نشده.</div>'
+        if len(cdeals) > 10:
+            cards += lock_note_static_html()
         pg = PAGE_HTML.replace("{TITLE}", CATS[code][1])
         pg = pg.replace("{DESC}", CATS[code][2])
         pg = pg.replace("{STYLE}", STYLE)
+        pg = pg.replace("{ICONS_JS}", json.dumps(ICON_PATHS))
         pg = pg.replace("{MASTHEAD}", masthead_html(prefix="../", index_mode=False))
         pg = pg.replace("{EDITION}", edition_html(updated_fa))
         pg = pg.replace("{CHIPS}", chips_html(cities, cats, prefix="../", active_cat=code))
@@ -645,7 +910,7 @@ def build(db_path, out_path, limit=80):
         pg = pg.replace("{H1}", f"فرصت‌های {CATS[code][1]}")
         pg = pg.replace("{INTRO}", f"{fa_num(len(cdeals))} آگهی زیرقیمت در دسته {CATS[code][1]}.")
         pg = pg.replace("{CARDS}", cards)
-        pg = pg.replace("{PAGE_DEALS_JSON}", json.dumps(cdeals, ensure_ascii=False))
+        pg = pg.replace("{PAGE_DEALS_JSON}", json.dumps([public_deal(d) for d in cdeals], ensure_ascii=False))
         pg = pg.replace("{SHARED_JS}", SHARED_JS)
         pg = pg.replace('id="updated"></span>',
                         'id="updated">آخرین به‌روزرسانی: ' + updated_fa + '</span>')
