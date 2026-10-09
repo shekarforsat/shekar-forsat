@@ -232,7 +232,7 @@ SHARED_JS = """
     var items = Array.from(window.savedDeals).map(window.dealById).filter(Boolean);
     var cnt = document.getElementById('savedCount'); if (cnt) cnt.textContent = faNum(items.length);
     list.innerHTML = items.length ? items.map(function(d){
-      return '<article class="saved-item"><h3><a href="' + d.url + '" target="_blank" rel="noopener">' + d.title + '</a></h3><p>' + faNum(dealDiscount(d)) + '٪ زیر قیمت همتا · ' + d.city + ' · ' + d.cat_fa + '</p></article>';
+      return '<article class="saved-item"><h3>' + d.title + '</h3><p>' + faNum(dealDiscount(d)) + '٪ زیر قیمت همتا · ' + d.city + ' · ' + d.cat_fa + '</p></article>';
     }).join('') : '<p class="empty">هنوز فرصتی نشان نکرده‌ای.</p>';
   }
   window.renderSaved = renderSaved;
@@ -290,16 +290,14 @@ def card_static_html(d, delay_ms=0):
     return (
         '<article class="card" style="--delay:' + str(delay_ms) + 'ms">'
         + bookmark_static_html(d) +
-        '<a class="card-main" href="' + d["url"] + '" target="_blank" rel="noopener"'
-        ' aria-label="' + d["title"] + '، ' + fa_num(pct) + ' درصد زیر قیمت">'
+        '<div class="card-main">'
         '<div class="card-icon">' + icon + '</div>'
         '<div class="meta"><span>' + d["cat_fa"] + '</span><span>' + loc + '</span></div>'
         '<h3><span class="mark">' + fa_num(pct) + '٪</span> زیر قیمت همتا</h3>'
         '<div class="deal-title">' + d["title"] + '</div>'
         + meter_html(d) + deal_bar_html(d) +
         '<div class="confidence">' + fa_num(d["n_comps"]) + ' نمونهٔ همتا · اطمینان ' + _conf(d["n_comps"]) + '</div>'
-        '<span class="text-link">مشاهدهٔ آگهی ←</span>'
-        '</a></article>'
+        '</div></article>'
     )
 
 
@@ -456,7 +454,7 @@ window.PAGE_DEALS = [];
       + '<div class="feature-copy"><div class="meta"><span>' + d.cat_fa + '</span><span>' + d.city + '</span><span>' + badge + '</span></div>'
       + '<h3>' + d.title + '</h3><div class="price">' + faPrice(d.price) + ' تومان</div>'
       + meter(d) + dealBar(d) + confRow(d)
-      + '<p><a class="primary" href="' + d.url + '" target="_blank" rel="noopener">مشاهدهٔ آگهی ←</a></p></div>';
+      + '</div>';
     document.getElementById('featureDots').innerHTML = tops.map(function(item, i){
       return '<button class="feature-dot" type="button" data-feature="' + i + '" aria-label="نمایش فرصت ' + faNum(i + 1) + '" aria-pressed="' + (i === featureIndex % tops.length) + '"></button>';
     }).join('');
@@ -501,12 +499,12 @@ window.PAGE_DEALS = [];
     cardsEl.innerHTML = items.length ? items.map(function(d, i){
       var pct = dealDiscount(d);
       return '<article class="card" style="--delay:' + (i * 110) + 'ms">' + bookmarkHTML(d)
-        + '<a class="card-main" href="' + d.url + '" target="_blank" rel="noopener" aria-label="' + d.title + '، ' + faNum(pct) + ' درصد زیر قیمت">'
+        + '<div class="card-main">'
         + '<div class="card-icon">' + icon(d.icon) + '</div>' + metaRow(d)
         + '<h3><span class="mark">' + faNum(pct) + '٪</span> زیر قیمت همتا</h3>'
         + '<div class="deal-title">' + d.title + '</div>'
         + meter(d) + dealBar(d) + confRow(d)
-        + '<span class="text-link">مشاهدهٔ آگهی ←</span></a></article>';
+        + '</div></article>';
     }).join('') : '<p class="empty">فرصتی با این جست‌وجو و فیلتر پیدا نشد.</p>';
     document.getElementById('filterStatus').textContent = faNum(items.length) + ' فرصت نمایش داده شد';
     if (animateNow && !reduceMotion){ cardsEl.classList.remove('is-staggering'); void cardsEl.offsetWidth; cardsEl.classList.add('is-staggering'); }
